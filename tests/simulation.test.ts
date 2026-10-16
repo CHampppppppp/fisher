@@ -83,8 +83,10 @@ test('invalid resets reject atomically including body outside coast or inside sh
 test('tick counts are validated, zero is idle, maximum is finite', () => {
   const game = fresh(); game.advanceTicks(0); assert.equal(game.getState().simulationTick, 0);
   for (const count of [-1, 1.5, 36001, NaN, '60']) assert.throws(() => game.advanceTicks(count));
-  game.advanceTicks(36000); assert.equal(game.getState().simulationTick, 12600);
-  assert.equal(game.getState().gamePhase, 'dead'); // Valid maximum request stops when starvation ends the session.
+  game.advanceTicks(36000); assert.equal(game.getState().simulationTick, 36000);
+  assert.equal(game.getState().gamePhase, 'running'); // Ten minutes remains safe at the new hunger rate.
+  game.advanceTicks(15000); assert.equal(game.getState().gamePhase, 'dead');
+  assert.equal(game.getState().simulationTick, 51000);
 });
 
 test('automatic clock and manual ticks have one owner; paused wall time is discarded', () => {
@@ -137,7 +139,7 @@ test('fishing defaults to idle and casting 0/0.5/1.5s gives 3/10.5/18m', () => {
     assert.deepEqual(game.getState().fishing.cast, first.fishing.cast);
     game.advanceTicks(1); assert.equal(game.getState().fishing.phase, 'bite');
     game.advanceTicks(60); assert.equal(game.getState().fishing.phase, 'idle'); assert.equal(game.getState().fish.length, 0);
-    assert.equal(first.player.hp, 100); close(first.player.hunger, 100-ticks/120); assert.equal(first.coins, 0);
+    assert.equal(first.player.hp, 100); close(first.player.hunger, 100-ticks/600); assert.equal(first.coins, 0);
   }
 });
 
@@ -809,14 +811,14 @@ test('food restores species hunger only, consumes once, clamps at 100 and full h
 });
 
 test('hunger updates before strict low-hunger damage with exact boundary and food precedes the next step', () => {
-  const high=survivalGame(100,21); high.advanceTicks(60); close(high.getState().player.hunger,20.5); close(high.getState().player.hp,100);
-  const low=survivalGame(80,19.5); low.advanceTicks(60); close(low.getState().player.hunger,19); close(low.getState().player.hp,78);
-  const boundary=survivalGame(100,21); boundary.advanceTicks(120);
+  const high=survivalGame(100,21); high.advanceTicks(60); close(high.getState().player.hunger,20.9); close(high.getState().player.hp,100);
+  const low=survivalGame(80,19.5); low.advanceTicks(60); close(low.getState().player.hunger,19.4); close(low.getState().player.hp,78);
+  const boundary=survivalGame(100,21); boundary.advanceTicks(600);
   close(boundary.getState().player.hunger,20); close(boundary.getState().player.hp,100); boundary.advanceTicks(1);
-  close(boundary.getState().player.hunger,20-1/120); close(boundary.getState().player.hp,100-1/30);
+  close(boundary.getState().player.hunger,20-1/600); close(boundary.getState().player.hp,100-1/30);
   const zero=survivalGame(100,0); zero.advanceTicks(60); close(zero.getState().player.hunger,0); close(zero.getState().player.hp,98);
   const saved=survivalGame(1,19.5,[storedFish()]); eat(saved); saved.advanceTicks(60);
-  close(saved.getState().player.hunger,31); close(saved.getState().player.hp,1); assert.equal(saved.getState().gamePhase,'running');
+  close(saved.getState().player.hunger,31.4); close(saved.getState().player.hp,1); assert.equal(saved.getState().gamePhase,'running');
 });
 
 test('inventory menu freezes every timer, permits food, rejects gameplay and releases inputs on close', () => {
@@ -934,7 +936,7 @@ test('shop freezes all timers, preserves fish and held-input release, and cannot
   game.advanceTicks(600); assert.deepEqual(game.getState(),paused); assert.equal(game.dispatch({type:'resume'}).accepted,false);
   assert.equal(game.dispatch({type:'openInventory'}).accepted,false); assert.equal(game.dispatch({type:'closeInventory'}).accepted,false);
   game.dispatch({type:'closeShop'}); game.advanceTicks(1); const resumed=game.getState();
-  assert.equal(resumed.gamePhase,'running'); assert.deepEqual(resumed.player.position,paused.player.position); close(resumed.player.hunger,19.5-1/120); close(resumed.attackCooldownRemaining,.45-1/60);
+  assert.equal(resumed.gamePhase,'running'); assert.deepEqual(resumed.player.position,paused.player.position); close(resumed.player.hunger,19.5-1/600); close(resumed.attackCooldownRemaining,.45-1/60);
   game.dispatch({type:'openShop'}); game.dispatch({type:'pause'}); game.dispatch({type:'closeShop'}); assert.equal(game.getState().gamePhase,'paused');
   game.dispatch({type:'openShop'}); game.dispatch({type:'closeShop'}); assert.equal(game.getState().gamePhase,'paused');
   game.dispatch({type:'openInventory'}); assert.equal(game.dispatch({type:'openShop'}).accepted,false); assert.equal(game.dispatch({type:'closeShop'}).accepted,false);
@@ -1296,4 +1298,56 @@ test('settings do not allow gameplay consumption, including when opened from a t
 
 test('volume accepts finite fractional percentages across the documented zero-to-hundred range',()=>{
   const next=updateSettings(defaultSettings(),{volume:50.5});assert.equal(next.volume,50.5);for(const volume of [NaN,Infinity,-.1,100.1])assert.throws(()=>updateSettings(defaultSettings(),{volume}));
+});
+
+
+test('legacy v1 hunger loads without a jump and new saves resume at the slower rate', () => {
+  const original = fresh(); original.advanceTicks(120);
+  const legacy = original.exportSave();
+  legacy.runtime.survival.hungerBase = 100;
+  legacy.runtime.survival.hungerTicks = 120;
+  legacy.state.player.hunger = 99;
+  const recovered = fresh(); recovered.importSave(legacy);
+  assert.equal(recovered.getState().player.hunger, 99);
+  recovered.dispatch({type:'resume'}); recovered.advanceTicks(60);
+  close(recovered.getState().player.hunger, 98.9);
+  const saved = recovered.exportSave();
+  assert.equal(saved.version, 1); assert.equal(saved.runtime.survival.hungerTicks, 0);
+  const next = fresh(); next.importSave(saved);
+  close(next.getState().player.hunger, 98.9);
+  next.dispatch({type:'resume'}); next.advanceTicks(60);
+  close(next.getState().player.hunger, 98.8);
+});
+
+test('Boss playtest starts paused, permits real damage and restarts the preset encounter', () => {
+  const game = new Game(true);
+  const initial = game.getState();
+  assert.equal(initial.gamePhase, 'paused'); assert.equal(initial.boss.hp, 600);
+  assert.equal(initial.currentWeapon, 'hammer'); assert.equal(initial.mode, 'combat');
+  assert.equal(initial.unlockedWeapons.length, 4); assert.equal(initial.rareCaughtCount, 3);
+  game.advanceTicks(600); assert.equal(game.getState().simulationTick, 0);
+  game.dispatch({type:'resume'}); game.dispatch({type:'primaryDown'}); game.advanceTicks(1);
+  assert.equal(game.getState().boss.hp, 535);
+  game.dispatch({type:'restart',confirm:true});
+  const restarted = game.getState();
+  assert.equal(restarted.boss.hp, 600); assert.equal(restarted.player.hp, 100);
+  assert.equal(restarted.player.hunger, 100); assert.equal(restarted.gamePhase, 'paused');
+  assert.equal(restarted.currentWeapon, 'hammer');
+  assert.equal(new Game().getState().boss.state, 'locked');
+});
+
+test('Boss playtest cannot save, load or import even through direct persistence calls', async () => {
+  class ForbiddenStore extends SaveStore {
+    override async write(): Promise<void> { assert.fail('must not write ordinary save'); }
+    override async read(): Promise<unknown> { assert.fail('must not read ordinary save'); }
+  }
+  const game = new Game(true);
+  const persistence = new Persistence(game, {
+    status:()=>{}, beginLoad:()=>assert.fail('must not load'), endLoad:()=>{},
+    restored:()=>assert.fail('must not restore'),
+  }, new ForbiddenStore(), false);
+  for (const result of [await persistence.save(), await persistence.load(), await persistence.importSave(fresh().exportSave())]) {
+    assert.equal(result.ok, false); assert.match(result.error!, /专项试玩/);
+  }
+  assert.equal(game.getState().boss.hp, 600); assert.equal(game.getState().gamePhase, 'paused');
 });

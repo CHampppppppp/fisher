@@ -23,7 +23,7 @@ test('actual E opens the counter, lists exact prices and sells one original corp
   await expect(page.locator('#shop-balance')).toContainText('40');await expect(page.locator('#coins-value')).toHaveText('40');await expect(page.locator('#shop-status')).toContainText('已出售');
   await page.evaluate(()=>window.__islandTest!.dispatch({type:'sell',fishId:'trade-1'}));await expect(page.locator('#shop-status')).toContainText('已消费或不在背包');
   await expect(page.locator('#fish-notice')).toBeHidden();await page.locator('#close-shop').click();await page.keyboard.up('KeyW');await page.evaluate(()=>window.__islandTest!.advanceTicks(1));
-  state=await page.evaluate(()=>window.__islandTest!.getState());expect(state.player.position).toEqual(frozen.player.position);expect(state.player.hp).toBeCloseTo(80-1/30,6);expect(state.player.hunger).toBeCloseTo(19.5-1/120,6);expect(state.coins).toBe(40);
+  state=await page.evaluate(()=>window.__islandTest!.getState());expect(state.player.position).toEqual(frozen.player.position);expect(state.player.hp).toBeCloseTo(80-1/30,6);expect(state.player.hunger).toBeCloseTo(19.5-1/600,6);expect(state.coins).toBe(40);
   expect(errors).toEqual([]);
 });
 

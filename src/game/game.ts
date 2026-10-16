@@ -56,10 +56,19 @@ export class Game {
   private settingsReturnPhase: 'paused' | 'dead' | 'victory' = 'paused';
   private settingsBasePhase: GameState['gamePhase'] = 'paused';
 
-  constructor() {
+  constructor(private readonly bossPlaytest = false) {
     this.world = makeWorld('island');
     this.state = this.newState('island', 0, { x: 4, y: 1, z: -7 }, -0.3, 0);
     this.bossSimulation = new BossSimulation(this.world); this.state.boss = this.bossSimulation.state;
+    this.state.gamePhase = 'paused'; this.state.ui.menu = 'pause';
+    if (bossPlaytest) this.prepareBossPlaytest();
+  }
+
+  private prepareBossPlaytest(): void {
+    this.reset({ seed: 1, fixture: 'boss-arena', initial: {
+      unlockedWeapons: ['fist', 'club', 'spear', 'hammer'], currentWeapon: 'hammer',
+    } });
+    this.state.mode = 'combat';
     this.state.gamePhase = 'paused'; this.state.ui.menu = 'pause';
   }
 
@@ -296,6 +305,7 @@ export class Game {
   }
 
   private restart(): void {
+    if (this.bossPlaytest) { this.prepareBossPlaytest(); return; }
     const fixture = this.state.fixture; const seed = this.state.seed;
     this.world = makeWorld(fixture);
     this.state = this.newState(fixture, seed, fixture === 'island' ? { x: 4, y: 1, z: -7 } : { x: 0, y: 1, z: fixture === 'fish-arena' ? 3.5 : fixture==='boss-arena'?8.5:0 }, fixture === 'island' ? -0.3 : 0, fixture === 'fish-arena' ? -.6 : 0, this.initialFishRngState);

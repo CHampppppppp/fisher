@@ -53,3 +53,5 @@
 #pause-restart{min-height:40px;margin:10px 0 0 8px;padding:9px 16px;border:1px solid #ead3a877;border-radius:2px;background:#203f3ccc;color:#f5e5c6;cursor:pointer;font-size:12px}
 .setting-range input:focus{outline:3px solid #f4c26a;outline-offset:5px}
 @media(min-width:801px) and (max-height:800px){.settings-panel{padding:18px 26px}.setting-range{margin:10px 0}.settings-panel h3{margin-top:12px}#settings-bindings{gap:4px 24px}.binding-row button{min-height:32px}}
+
+#playtest-banner{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9;margin:0;padding:6px 12px;background:#152e30ee;color:#ffe2a3;font-size:12px;pointer-events:none;white-space:nowrap}#playtest-entry{margin:12px 0;font-size:13px}#playtest-entry a{color:#ffe2a3;text-underline-offset:4px}#playtest-entry a:focus-visible{outline:2px solid #ffe2a3;outline-offset:4px}

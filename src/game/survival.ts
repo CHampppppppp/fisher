@@ -5,19 +5,20 @@ import { shopBlocks } from './fishing.ts';
 export const INVENTORY_CAPACITY = 10;
 export const FOOD = Object.freeze({ sprat: 12, bass: 20, tuna: 30, golden: 40 });
 
-/** Count real steps from a baseline, so 120 hunger steps reach the exact 20 boundary. */
+/** Fixed-step hunger calculation; version-1 saves use a normalized baseline. */
 export class Survival {
   private hungerTicks = 0;
   private damageTicks = 0;
   constructor(private hpBase = 100, private hungerBase = 100) {}
 
   snapshot(): { hpBase: number; hungerBase: number; hungerTicks: number; damageTicks: number } {
-    return { hpBase: this.hpBase, hungerBase: this.hungerBase, hungerTicks: this.hungerTicks, damageTicks: this.damageTicks };
+    return { hpBase: this.hpBase, hungerBase: Math.max(0, this.hungerBase - this.hungerTicks / 600), hungerTicks: 0, damageTicks: this.damageTicks };
   }
 
   static restore(value: ReturnType<Survival['snapshot']>): Survival {
-    const result = new Survival(value.hpBase, value.hungerBase);
-    result.hungerTicks = value.hungerTicks; result.damageTicks = value.damageTicks;
+    const result = new Survival(value.hpBase, Math.max(0, value.hungerBase - value.hungerTicks / 120));
+    // Existing v1 files counted hunger at 1/120 per tick; retain their current value.
+    result.damageTicks = value.damageTicks;
     return result;
   }
 
@@ -32,7 +33,7 @@ export class Survival {
   }
 
   step(player: Player): void {
-    player.hunger = Math.max(0, this.hungerBase - ++this.hungerTicks / 120);
+    player.hunger = Math.max(0, this.hungerBase - ++this.hungerTicks / 600);
     if (player.hunger < 20) player.hp = Math.max(0, this.hpBase - ++this.damageTicks / 30);
   }
 }

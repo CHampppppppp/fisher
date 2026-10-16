@@ -15,8 +15,14 @@ function message(error: unknown): string { return error instanceof Error ? error
 /** Storage operations queue; imports and real reads have one validator and one production commit. */
 export class Persistence {
   private pending: Promise<unknown> = Promise.resolve();
-  constructor(private game: Game, private hooks: PersistenceHooks, private store = new SaveStore()) {}
+  constructor(private game: Game, private hooks: PersistenceHooks, private store = new SaveStore(), private storageAllowed = true) {}
 
+  private blocked(): Promise<SaveResult> {
+    const error = 'Boss专项试玩不读写存档，请返回普通游戏操作';
+    this.game.persistenceResult(false, 'playtest-storage-disabled');
+    this.hooks.status(error, false);
+    return Promise.resolve({ok: false, error});
+  }
   private enqueue(operation:()=>Promise<SaveResult>): Promise<SaveResult> {
     const result=this.pending.then(operation);this.pending=result.catch(()=>undefined);return result;
   }
@@ -24,6 +30,7 @@ export class Persistence {
   async exportSave(): Promise<SaveFile> { await this.pending;return this.game.exportSave(); }
 
   save(): Promise<SaveResult> {
+    if (!this.storageAllowed) return this.blocked();
     return this.enqueue(async()=>{
       this.hooks.status('正在保存完整进度…',true);
       try {
@@ -46,6 +53,7 @@ export class Persistence {
   }
 
   load(): Promise<SaveResult> {
+    if (!this.storageAllowed) return this.blocked();
     return this.enqueue(async()=>{
       this.hooks.status('正在读取存档…',true);this.hooks.beginLoad();
       try {
@@ -58,6 +66,7 @@ export class Persistence {
   }
 
   importSave(value: unknown): Promise<SaveResult> {
+    if (!this.storageAllowed) return this.blocked();
     // Capture the caller's object now; later caller changes cannot race a queued import.
     let captured:unknown;
     try {captured=validateSave(value);}catch(error){const reason=message(error);this.hooks.status(`导入失败：${reason}。当前进度与旧存档保持不变。`,false);return Promise.resolve({ok:false,error:reason});}

@@ -12,22 +12,25 @@ import { readSettings, writeSettings } from './game/settings.ts';
 const ui = new UI(document.querySelector<HTMLElement>('#app')!);
 
 async function initialize(): Promise<void> {
-  const game = new Game();
+  const params = new URLSearchParams(location.search);
+  const bossPlaytest = params.get('playtest') === 'boss';
+  const game = new Game(bossPlaytest);
+  ui.setBossPlaytest(bossPlaytest);
   const preferences = readSettings(); game.installSettings(preferences.settings,writeSettings);
   if (preferences.error) ui.setSettingsMessage(preferences.error);
   const view = new IslandView(ui.canvas, game.getWorld());
   const audio = new FishingAudio();
   let controller: Controller | undefined;
   const draw = () => { const state = game.getState(); controller?.observePhase(state); view.render(state); ui.update(state); audio.update(state); };
-  const testing = new URLSearchParams(location.search).get('test') === '1';
-  const realClock = new URLSearchParams(location.search).get('clock') === 'real';
+  const testing = params.get('test') === '1';
+  const realClock = params.get('clock') === 'real';
   const clock = new GameClock(game, draw, testing && !realClock);
   controller = new Controller(game, clock, ui, draw);
   const persistence = new Persistence(game, {
     status: (message,busy) => ui.setStorageStatus(message,busy),
     beginLoad: () => controller!.beginLoad(), endLoad: () => controller!.endLoad(),
     restored: () => { view.rebuild(game.getWorld()); controller!.restored(); audio.clearHistory(); },
-  });
+  }, undefined, !bossPlaytest);
   controller.setPersistence(persistence);
   draw(); clock.start();
   if (testing) {

@@ -30,7 +30,7 @@ test('real punches, E pickup and Tab food selection consume the same corpse exac
   await expect(page.locator('#inventory-status')).toContainText('已食用'); await expect(page.locator('#eat-button')).toBeDisabled();
   await expect(page.locator('#inventory-vitals')).toContainText('生命 80 / 100'); await expect(page.locator('#inventory-vitals')).toContainText('饥饿 100 / 100');
   await page.locator('#close-inventory').click(); await page.evaluate(()=>window.__islandTest!.advanceTicks(60));
-  state=await page.evaluate(()=>window.__islandTest!.getState()); expect(state.player.hunger).toBe(99.5); expect(state.player.hp).toBe(80);
+  state=await page.evaluate(()=>window.__islandTest!.getState()); expect(state.player.hunger).toBe(99.9); expect(state.player.hp).toBe(80);
   expect(errors).toEqual([]);
 });
 
@@ -49,7 +49,7 @@ test('low hunger inventory freezes on blur, food is immediate, close still requi
   await page.locator('#close-inventory').click(); await expect(page.getByRole('button',{name:'继续探索'})).toBeVisible();
   await page.evaluate(()=>window.__islandTest!.advanceTicks(300)); expect((await page.evaluate(()=>window.__islandTest!.getState())).player.hunger).toBe(59.5);
   await page.getByRole('button',{name:'继续探索'}).click(); await page.keyboard.up('KeyW'); await page.evaluate(()=>window.__islandTest!.advanceTicks(60));
-  const after=await page.evaluate(()=>window.__islandTest!.getState()); expect(after.player.hunger).toBe(59); expect(after.player.hp).toBe(80); expect(after.player.position).toEqual(before.player.position);
+  const after=await page.evaluate(()=>window.__islandTest!.getState()); expect(after.player.hunger).toBe(59.4); expect(after.player.hp).toBe(80); expect(after.player.position).toEqual(before.player.position);
 });
 
 test('capacity and hunger-full failures are visible; death freezes and confirmed restart begins a fist session',async({page})=>{

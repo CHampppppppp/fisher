@@ -79,11 +79,13 @@ export class UI {
   private shopHint: HTMLElement;
   private shopSignature = '';
   private currentState: GameState | null = null;
+  private bossPlaytest = false;
   private bindingSignature = '';
   private hintTemplates: [HTMLElement,string][] = [];
 
   constructor(root: HTMLElement) {
     root.innerHTML = `
+      <p id="playtest-banner" hidden>Boss专项试玩 · 预置装备，不代表完整流程通关</p>
       <canvas id="world" aria-label="第一人称海岛游戏场景"></canvas>
       <header class="identity"><span class="brand">潮生<span class="brand-dot">.</span></span><span class="edition">ISLAND / 12</span></header>
       <p id="rare-progress" role="status">金鳞捕获 0 / 3</p>
@@ -139,6 +141,7 @@ export class UI {
           <button id="pause-inventory" type="button" hidden>打开背包</button>
           <button id="settings-button" type="button">设置与键位</button><button id="pause-restart" type="button" hidden>重新开始新局</button>
           ${this.storageTools()}
+          <p id="playtest-entry"><a href="?playtest=boss">Boss 专项试玩</a></p>
           <p class="lock-help">点击后锁定鼠标 · 移动鼠标观察 · Esc 释放鼠标</p>
           <p id="menu-message" role="status" aria-live="polite"></p>
         </div>
@@ -294,6 +297,17 @@ export class UI {
     }
   }
 
+  setBossPlaytest(enabled: boolean): void {
+    this.bossPlaytest = enabled;
+    document.querySelector<HTMLElement>('#playtest-banner')!.hidden = !enabled;
+    if (enabled) {
+      document.querySelector('#playtest-entry')!.innerHTML = '<a href="./">返回普通游戏</a>';
+      document.querySelectorAll<HTMLElement>('.storage-tools').forEach(section => {
+        section.hidden = true;
+      });
+    }
+  }
+
   markStarted(): void {
     if (this.started) return;
     this.started = true;
@@ -328,6 +342,12 @@ export class UI {
       document.querySelector('#menu-description')!.textContent = victory ? '通关成功 · 章鱼已被击败。海岛重新安静下来，这次探索到此完成。' : dead ? state.deathReason==='boss' ? '生命耗尽。章鱼的攻击终结了这次探索。重新开始，留意地面预警与墨汁方向。' : '生命耗尽。饥饿低于 20 时会持续失去生命。重新开始，再次探索海岛。' : '海风还在，时间已停。准备好后，继续探索这座岛。';
       this.button.textContent = dead || victory ? '重新开始' : '继续探索';
       document.querySelector('.lock-help')!.textContent = dead || victory ? '确认重新开始后重置本局进度，并锁定鼠标' : '点击后锁定鼠标 · 移动鼠标观察 · Esc 释放鼠标';
+    }
+    if (this.bossPlaytest) {
+      document.querySelector('#menu-title')!.textContent = victory ? '试玩完成' : dead ? '挑战失败' : 'Boss 专项试玩';
+      document.querySelector('#menu-description')!.textContent = `预置满生命与饥饿，解锁全部武器，默认重锤。${['weapon1','weapon2','weapon3','weapon4'].map(action => this.key(action as BindingAction)).join(' / ')} 切换武器，左键攻击，${['forward','left','backward','right'].map(action => this.key(action as BindingAction)).join(' / ')} 移动躲避预警。此入口不读写存档，不能作为完整流程通关证据。`;
+      this.button.textContent = dead || victory ? '再次挑战' : this.started ? '继续挑战' : '开始挑战';
+      this.pauseRestartButton.textContent = '重新挑战 Boss';
     }
     document.body.classList.toggle('is-paused', paused);
     this.hp.textContent = String(Number(state.player.hp.toFixed(1)));
