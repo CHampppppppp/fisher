@@ -15,6 +15,7 @@ export function keyLabel(code:string):string {
 }
 export function bindingCodes(action:BindingAction,code:string):string[] {
   if(action==='sprint'&&code==='ShiftLeft')return [code,'ShiftRight'];
+  if(action==='dive'&&code==='ControlLeft')return [code,'ControlRight'];
   if(action.startsWith('slot')&&code===`Digit${action.at(-1)}`)return [code,`Numpad${action.at(-1)}`];
   return [code];
 }

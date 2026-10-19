@@ -13,6 +13,8 @@ export class Controller {
   private primaryHeld = false;
   private pointerFree = false;
   private lockForHud = false;
+  private lockRequestId = 0;
+  private lockUsesPromise = false;
   private persistence?: Persistence;
   private loading = false;
 
@@ -39,7 +41,7 @@ export class Controller {
       if (button) { ui.captureBinding(button.dataset.bindingAction as BindingAction); this.draw(); }
     }, options);
     ui.shopButton.addEventListener('click', () => this.dispatch({type:'openShop'}), options);
-    ui.closeShopButton.addEventListener('click', () => this.dispatch({type:'closeShop'}), options);
+    ui.closeShopButton.addEventListener('click', () => this.closeShopFromGesture(), options);
     ui.sellButton.addEventListener('click', () => this.dispatch({type:'sell',fishId:ui.selectedShopFishId}), options);
     ui.weaponBar.addEventListener('click', event=>{const b=(event.target as HTMLElement).closest<HTMLButtonElement>('[data-slot]');if(b)this.dispatch({type:'selectSlot',index:Number(b.dataset.slot)});},options);
     ui.purchaseList.addEventListener('click', event => {
@@ -69,7 +71,10 @@ export class Controller {
         this.clearInput(); this.ui.setPointerFree(true); this.draw();
       } else this.pause();
     }, options);
-    document.addEventListener('pointerlockerror', () => this.lockFailed(), options);
+    document.addEventListener('pointerlockerror', () => {
+      // Promise rejections carry a request ID; a legacy error event does not.
+      if (!this.lockUsesPromise) this.lockFailed();
+    }, options);
     window.addEventListener('blur', () => this.pause(), options);
     document.addEventListener('visibilitychange', () => { if (document.hidden) this.pause(); }, options);
     document.addEventListener('keydown', event => {
@@ -82,7 +87,8 @@ export class Controller {
         if (ui.closeHelp()) return;
         const menu = this.game.getState().ui.menu;
         if (menu === 'settings') this.dispatch({type:'closeSettings'});
-        else if (menu === 'shop') this.dispatch({type:'closeShop'});
+        else if (menu === 'shop') this.closeShopFromGesture();
+        else if (menu === 'pause' && ui.hasStarted) this.continueFromGesture();
         else this.pause();
         return;
       }
@@ -96,9 +102,8 @@ export class Controller {
       }
       if(event.code==='Tab'&&state.gamePhase==='running'){event.preventDefault();return;}
       const action = bindingAction(state.settings,event.code);
-      if (event.code==='Tab'&&state.ui.menu==='shop'){event.preventDefault();this.dispatch({type:'closeShop'});return;}
+      if (event.code==='Tab'&&state.ui.menu==='shop'){event.preventDefault();this.closeShopFromGesture();return;}
       if (!action || event.repeat) return;
-      if (event.code==='Tab'&&state.ui.menu==='shop'){event.preventDefault();this.dispatch({type:'closeShop'});return;}
       if (action.startsWith('slot')) {
         if(!this.canControl())return;event.preventDefault();this.dispatch({type:'selectSlot',index:Number(action.at(-1))-1});return;
       }
@@ -185,12 +190,13 @@ export class Controller {
 
   dispatch(action: unknown): GameState['lastAction'] {
     if (this.loading) return {accepted:false,reason:'storage-busy'};
-    // Closing a player-facing page returns to pause, never directly to live play.
+    // The removed inventory keeps its legacy pause handling; closing the shop resumes.
     if (action && typeof action === 'object' && Object.keys(action).length === 1) {
       const type = (action as {type?:string}).type;
       const menu = this.game.getState().ui.menu;
-      if ((type === 'closeInventory' && menu === 'inventory') || (type === 'closeShop' && menu === 'shop')) this.game.dispatch({type:'pause'});
+      if (type === 'closeInventory' && menu === 'inventory') this.game.dispatch({type:'pause'});
     }
+    const hadFishing=this.game.getState().fishing.phase!=='idle';
     const result = this.game.dispatch(action);
     if (result.accepted && result.reason === 'pause') this.pause();
     else if (result.accepted && result.reason === 'resume') this.resume();
@@ -201,7 +207,10 @@ export class Controller {
       this.ui.setPointerFree(this.pointerFree);
       if (document.pointerLockElement === this.ui.canvas) document.exitPointerLock();
     }
-    else if (result.accepted && ['selectSlot','setMode', 'cancelFishing', 'restart', 'settings-updated'].includes(result.reason)) {
+    else if(result.accepted&&['selectSlot','setMode','equip'].includes(result.reason)&&!hadFishing){
+      this.primaryHeld=false;this.game.clearPrimaryInput();
+    }
+    else if (result.accepted && ['selectSlot','setMode','equip', 'cancelFishing', 'restart', 'settings-updated'].includes(result.reason)) {
       this.clearInput();
       if (result.reason === 'restart') {
         this.clock.resetTime(); this.awaitingLock = false;
@@ -213,7 +222,7 @@ export class Controller {
     if (result.accepted && result.reason === 'openShop') this.ui.closeShopButton.focus();
     if (result.accepted && result.reason === 'openSettings') this.ui.volumeInput.focus();
     if (result.accepted && result.reason === 'closeSettings') this.ui.settingsButton.focus();
-    if (result.accepted && ['closeInventory','closeShop'].includes(result.reason)) this.ui.button.focus();
+    if (result.accepted && ['closeInventory','closeShop'].includes(result.reason) && this.game.getState().gamePhase === 'paused') this.ui.button.focus();
     return result;
   }
 
@@ -239,8 +248,28 @@ export class Controller {
   }
 
   private lockFailed(): void {
-    this.awaitingLock = false; this.pause();
-    this.ui.setMessage('鼠标锁定未成功，请再次点击按钮。桌面浏览器需要允许鼠标锁定。');
+    if (!this.awaitingLock) return;
+    const keepPlaying = this.lockForHud && this.game.getState().gamePhase === 'running';
+    this.awaitingLock = false; this.lockForHud = false;
+    if (keepPlaying) {
+      this.clearInput(); this.pointerFree = true; this.ui.setPointerFree(true); this.draw();
+    } else {
+      this.pause(); this.ui.setMessage('鼠标锁定未成功，请再次点击按钮。桌面浏览器需要允许鼠标锁定。');
+    }
+  }
+
+  private continueFromGesture(): void {
+    if (this.loading || document.hidden || !document.hasFocus()) return;
+    const state = this.game.getState();
+    if (state.gamePhase !== 'paused' || state.ui.menu !== 'pause') return;
+    this.resume();
+    this.pointerFree = true; this.ui.setPointerFree(true);
+    void this.startFromClick(true);
+  }
+
+  private closeShopFromGesture(): void {
+    const result = this.dispatch({type:'closeShop'});
+    if (result.accepted && this.game.getState().gamePhase === 'running') void this.startFromClick(true);
   }
 
   private async startFromClick(forHud = false): Promise<void> {
@@ -248,7 +277,14 @@ export class Controller {
     if (!this.ui.canvas.requestPointerLock) { this.ui.setMessage('当前浏览器不支持 Pointer Lock，请使用桌面浏览器。'); return; }
     this.awaitingLock = true;
     this.lockForHud = forHud;
-    try { await this.ui.canvas.requestPointerLock(); } catch { this.lockFailed(); }
+    const requestId = ++this.lockRequestId;
+    try {
+      const request = this.ui.canvas.requestPointerLock();
+      this.lockUsesPromise = Boolean(request && typeof request.then === 'function');
+      await request;
+    } catch {
+      if (requestId === this.lockRequestId) this.lockFailed();
+    }
   }
 
   dispose(): void { this.events.abort(); this.clearInput(); }

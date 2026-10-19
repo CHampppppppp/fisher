@@ -4,6 +4,7 @@ import { shopBlocks } from './fishing.ts';
 
 export const INVENTORY_CAPACITY = 10;
 export const FOOD = Object.freeze({ sprat: 12, bass: 20, tuna: 30, golden: 40 });
+export const EAT_DURATION_TICKS = 120;
 
 /** Fixed-step hunger calculation; v2 saves use a normalized baseline. */
 export class Survival {
@@ -28,12 +29,14 @@ export class Survival {
 
   damage(player: Player, amount: number): void {
     player.hp = Math.max(0, player.hp - amount);
+    if(player.hp<=1e-9)player.hp=0;
     this.hpBase = player.hp; this.damageTicks = 0;
   }
 
   step(player: Player): void {
     player.hunger = Math.max(0, this.hungerBase - ++this.hungerTicks / 600);
     if (player.hunger < 20) player.hp = Math.max(0, this.hpBase - ++this.damageTicks / 30);
+    if(player.hp<=1e-9)player.hp=0;
   }
 }
 

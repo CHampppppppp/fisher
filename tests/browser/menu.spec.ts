@@ -27,31 +27,14 @@ test('menus hide gameplay HUD and remain usable at desktop and narrow panel size
   expect(errors).toEqual([]);
 });
 
-test('Escape cancels binding capture first, then returns each subpage to a frozen pause menu', async ({page}) => {
+test('Escape cancels binding capture first and settings still return to pause', async ({page}) => {
   await page.goto('/?test=1');
   await page.locator('#settings-button').click();
   await page.locator('[data-binding-action=interact]').click();
   await page.keyboard.press('Escape');
   await expect(page.locator('#settings-menu')).toBeVisible();
   await expect(page.locator('#settings-status')).toHaveText('已取消绑定');
-  await page.keyboard.press('Escape'); await expect(page.locator('#menu')).toBeVisible();
-  for (const menu of ['inventory','shop'] as const) {
-    await page.evaluate(async menu => {
-      const api = window.__islandTest!;
-      await api.reset({seed:1,fixture:'shore',initial:{player:{position:{x:-6,y:1,z:-3},yaw:0}}});
-      await api.dispatch({type:menu==='inventory'?'openInventory':'openShop'});
-    },menu);
-    await expect(page.locator(`#${menu}-menu`)).toBeVisible();
-    const before = await state(page);
-    await page.keyboard.press('Escape');
-    expect((await state(page)).gamePhase).toBe('paused');
-    await page.evaluate(() => window.__islandTest!.advanceTicks(600));
-    expect((await state(page)).simulationTick).toBe(before.simulationTick);
-    await expect(page.locator('#menu')).toBeVisible();
-    await page.locator('#play-button').click();
-    await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
-    await page.evaluate(() => window.__islandTest!.advanceTicks(1));
-    expect((await state(page)).simulationTick).toBe(before.simulationTick+1);
-    await page.keyboard.press('Escape');
-  }
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#menu')).toBeVisible();
+  expect((await state(page)).gamePhase).toBe('paused');
 });

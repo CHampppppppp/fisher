@@ -38,7 +38,7 @@ test('jump reaches air, cannot jump in air, lands on sand', () => {
 });
 test('v2 coast permits water entry while the outer world boundary still blocks movement',()=>{
  const g=fresh();move(g,1,1,true);g.dispatch({type:'jump'});g.advanceTicks(600);
- assert.ok(g.getState().player.position.x>10);assert.equal(g.getState().locomotion,'swimming');close(g.getState().player.position.y,-1.35);
+ assert.ok(g.getState().player.position.x>10);assert.equal(g.getState().locomotion,'swimming');assert.ok(g.getState().player.position.y< -1.35);
  g.reset({seed:1,fixture:'shore'});move(g,-1,-1,true);g.advanceTicks(600);assert.ok(g.getState().player.position.x< -10);assert.ok(g.getState().player.position.z< -10);
 
 });
@@ -727,7 +727,7 @@ const storedFish = (id = 'food', species = 'sprat') => ({ id, species });
 const survivalGame = (hp = 100, hunger = 100, inventory: unknown[] = [], fish: unknown[] = []) => {
   const game = new Game(); game.reset({ seed:1, fixture:'shore', initial:{ player:{hp,hunger}, inventory, fish } }); return game;
 };
-const eat = (game: Game, fishId = 'food') => game.dispatch({type:'eat',fishId});
+const eatFully = (game: Game, fishId = 'food') => { const result=game.dispatch({type:'eat',fishId}); if(result.accepted) game.advanceTicks(120); return result; };
 
 test('survival reset validates vitals, inventory capacity and cross-location IDs atomically', () => {
   const game = survivalGame(80,90,[storedFish()]); const state=game.getState();
@@ -752,7 +752,7 @@ test('E production interaction transfers ten unique corpses and leaves the eleve
   assert.deepEqual(game.getState().inventory,full.inventory); assert.deepEqual(game.getState().fish,full.fish);
   assert.equal(new Set(full.inventory.map(item=>item.id)).size,10);
   assert.equal(full.events.filter(event=>event.type==='inventory').length,10);
-  game.dispatch({type:'openInventory'}); eat(game,'body-0'); game.dispatch({type:'closeInventory'});
+  game.dispatch({type:'openInventory'}); eatFully(game,'body-0'); game.dispatch({type:'closeInventory'});
   assert.equal(game.getState().inventory.length,9);
   assert.equal(game.dispatch({type:'interact'}).accepted,true); // A consumed slot can accept the previously rejected corpse.
   assert.equal(game.getState().inventory.length,10); assert.equal(game.getState().fish.length,0);
@@ -778,34 +778,34 @@ test('corpse pickup uses actual two metre range and obstruction, excludes live/t
 
 test('food restores species hunger only, consumes once, clamps at 100 and full hunger keeps the item', () => {
   for(const [species,recovery] of [['sprat',12],['bass',20],['tuna',30],['golden',40]] as const) {
-    const game=survivalGame(80,40,[storedFish('food',species)]); assert.equal(eat(game).accepted,true);
-    assert.equal(game.getState().player.hunger,40+recovery); assert.equal(game.getState().player.hp,80);
+    const game=survivalGame(80,40,[storedFish('food',species)]); assert.equal(eatFully(game).accepted,true);
+    close(game.getState().player.hunger,40+recovery-.2); assert.equal(game.getState().player.hp,80);
     assert.equal(game.getState().inventory.length,0); assert.equal(game.getState().consumedFish[0].state,'consumed');
-    assert.equal(eat(game).accepted,false); assert.equal(game.getState().events.filter(event=>event.type==='eat').length,1);
+    assert.equal(eatFully(game).accepted,false); assert.equal(game.getState().events.filter(event=>event.type==='eat').length,1);
   }
   const game=survivalGame(80,90,[storedFish(),storedFish('other')]);
-  assert.equal(eat(game).accepted,true); assert.equal(game.getState().player.hunger,100); assert.equal(game.getState().player.hp,80);
-  assert.equal(eat(game,'other').reason,'hunger-full'); assert.equal(game.getState().inventory.length,1);
+  assert.equal(eatFully(game).accepted,true); close(game.getState().player.hunger,100-1/600); assert.equal(game.getState().player.hp,80);
+  const full=survivalGame(80,100,[storedFish('other')]);assert.equal(eatFully(full,'other').reason,'hunger-full'); assert.equal(full.getState().inventory.length,1);
   const before=game.getState().inventory;
   assert.equal(game.dispatch({type:'eat',fishId:'other',hunger:0}).accepted,false); assert.deepEqual(game.getState().inventory,before);
-  assert.equal(eat(game,'alive').accepted,false);
+  assert.equal(eatFully(game,'alive').accepted,false);
 });
 
-test('hunger updates before strict low-hunger damage with exact boundary and food precedes the next step', () => {
+test('hunger updates before strict damage and unfinished food cannot save a starving player', () => {
   const high=survivalGame(100,21); high.advanceTicks(60); close(high.getState().player.hunger,20.9); close(high.getState().player.hp,100);
   const low=survivalGame(80,19.5); low.advanceTicks(60); close(low.getState().player.hunger,19.4); close(low.getState().player.hp,78);
   const boundary=survivalGame(100,21); boundary.advanceTicks(600);
   close(boundary.getState().player.hunger,20); close(boundary.getState().player.hp,100); boundary.advanceTicks(1);
   close(boundary.getState().player.hunger,20-1/600); close(boundary.getState().player.hp,100-1/30);
   const zero=survivalGame(100,0); zero.advanceTicks(60); close(zero.getState().player.hunger,0); close(zero.getState().player.hp,98);
-  const saved=survivalGame(1,19.5,[storedFish()]); eat(saved); saved.advanceTicks(60);
-  close(saved.getState().player.hunger,31.4); close(saved.getState().player.hp,1); assert.equal(saved.getState().gamePhase,'running');
+  const saved=survivalGame(1,19.5,[storedFish()]); eatFully(saved); saved.advanceTicks(60);
+  close(saved.getState().player.hp,0); assert.equal(saved.getState().gamePhase,'dead');assert.equal(saved.getState().inventory.length,1);assert.equal(saved.getState().consumedFish.length,0);
 });
 
 test('v2 pause freezes every timer, rejects consumption and clears input without a backpack page',()=>{
  const g=survivalGame(80,10,[storedFish()]);move(g);g.advanceTicks(1);g.dispatch({type:'pause'});const frozen=g.getState();g.advanceTicks(600);assert.deepEqual(g.getState(),frozen);
- assert.equal(eat(g).accepted,false);assert.equal(g.dispatch({type:'openInventory'}).accepted,false);assert.equal(g.dispatch({type:'selectSlot',index:5}).accepted,false);
- g.dispatch({type:'resume'});g.advanceTicks(1);assert.deepEqual(g.getState().player.position,frozen.player.position);g.dispatch({type:'selectSlot',index:5});g.dispatch({type:'primaryDown'});assert.equal(g.getState().consumedFish.length,1);
+ assert.equal(eatFully(g).accepted,false);assert.equal(g.dispatch({type:'openInventory'}).accepted,false);assert.equal(g.dispatch({type:'selectSlot',index:5}).accepted,false);
+ g.dispatch({type:'resume'});g.advanceTicks(1);assert.deepEqual(g.getState().player.position,frozen.player.position);g.dispatch({type:'selectSlot',index:5});g.dispatch({type:'primaryDown'});g.advanceTicks(120);assert.equal(g.getState().consumedFish.length,1);
 
 });
 
@@ -825,7 +825,7 @@ test('HP zero produces one game over, freezes the dead session and only confirme
 
 test('v2 inventory IDs reserve catch IDs and pause cannot consume food',()=>{
  const g=new Game();g.reset({seed:1,fixture:'shore',initial:{player:{position:{x:0,y:1,z:9},hunger:50},inventory:[storedFish('fish-1-1')]}});hook(g);landWithRealInputs(g);assert.equal(g.getState().fish[0].id,'fish-1-2');
- g.dispatch({type:'pause'});assert.equal(eat(g,'fish-1-1').accepted,false);assert.equal(g.getState().inventory.length,1);g.dispatch({type:'resume'});assert.equal(eat(g,'fish-1-1').accepted,true);assert.equal(g.getState().inventory.length,0);
+ g.dispatch({type:'pause'});assert.equal(eatFully(g,'fish-1-1').accepted,false);assert.equal(g.getState().inventory.length,1);g.dispatch({type:'resume'});g.dispatch({type:'move',forward:-1,strafe:0,sprint:false});g.advanceTicks(60);g.dispatch({type:'move',forward:0,strafe:0,sprint:false});assert.equal(g.dispatch({type:'interact'}).accepted,true);assert.equal(eatFully(g,'fish-1-1').accepted,true);assert.equal(g.getState().inventory.length,0);
 
 });
 
@@ -873,10 +873,10 @@ test('four corpse sales use exact prices and preserve every unrelated item and s
 
 test('a corpse can be sold or eaten only once and stale, live, carried and escaped selections never reward', () => {
   const sold=tradeGame(); sold.dispatch({type:'openShop'}); assert.equal(sell(sold).accepted,true); assert.equal(sold.getState().coins,40);
-  const after=sold.getState(); assert.equal(sell(sold).accepted,false); assert.equal(eat(sold,'trade-1').accepted,false);
+  const after=sold.getState(); assert.equal(sell(sold).accepted,false); assert.equal(eatFully(sold,'trade-1').accepted,false);
   assert.equal(sold.getState().coins,40); assert.deepEqual(sold.getState().player,after.player); assert.deepEqual(sold.getState().terminalFish,after.terminalFish);
-  const eaten=tradeGame(undefined,{position:{x:-6,y:1,z:-2},hunger:50}); eat(eaten,'trade-1'); eaten.dispatch({type:'openShop'});
-  assert.equal(sell(eaten).accepted,false); assert.equal(eaten.getState().coins,20); assert.equal(eaten.getState().player.hunger,70);
+  const eaten=tradeGame(undefined,{position:{x:-6,y:1,z:-2},hunger:50}); eatFully(eaten,'trade-1'); eaten.dispatch({type:'openShop'});
+  assert.equal(sell(eaten).accepted,false); assert.equal(eaten.getState().coins,20); close(eaten.getState().player.hunger,69.8);
   const invalid=tradeGame([]); invalid.dispatch({type:'openShop'});
   for(const id of ['alive','carried','escaped','', 'expired']) assert.equal(sell(invalid,id).accepted,false);
   assert.equal(invalid.getState().coins,20); assert.equal(invalid.getState().inventory.length,0); assert.equal(invalid.getState().terminalFish.length,0);
@@ -897,7 +897,7 @@ test('sales require the shop menu, reject price injection and overflow atomicall
 });
 
 test('shop freezes all timers, preserves fish and held-input release, and cannot bypass focus pause or other menus',()=>{
- const g=tradeGame();g.dispatch({type:'openShop'});const frozen=g.getState();g.advanceTicks(600);assert.deepEqual(g.getState(),frozen);assert.equal(g.dispatch({type:'resume'}).accepted,false);assert.equal(g.dispatch({type:'openInventory'}).accepted,false);g.dispatch({type:'closeShop'});assert.equal(g.getState().ui.menu,'pause');const tick=g.getState().simulationTick;g.advanceTicks(60);assert.equal(g.getState().simulationTick,tick);g.dispatch({type:'resume'});g.advanceTicks(1);assert.equal(g.getState().simulationTick,tick+1);
+ const g=tradeGame();g.dispatch({type:'openShop'});const frozen=g.getState();g.advanceTicks(600);assert.deepEqual(g.getState(),frozen);assert.equal(g.dispatch({type:'resume'}).accepted,false);assert.equal(g.dispatch({type:'openInventory'}).accepted,false);g.dispatch({type:'closeShop'});assert.equal(g.getState().ui.menu,'none');assert.equal(g.getState().gamePhase,'running');const tick=g.getState().simulationTick;g.advanceTicks(1);assert.equal(g.getState().simulationTick,tick+1);
 
 });
 
@@ -1032,8 +1032,8 @@ test('third real golden reel success keeps carried fish, increments once and spa
 
 test('rare capture count ignores later fish states and subsequent golden capture never duplicates the boss',()=>{
  const g=rareReel();landExactly(g);g.dispatch({type:'look',yaw:Math.PI,pitch:0});g.dispatch({type:'interact'});g.advanceTicks(140);assert.equal(g.getState().rareCaughtCount,3);assert.equal(g.getState().events.filter(e=>e.type==='boss_spawn').length,1);
- const next=new Game();next.reset({seed:1,fixture:'shore',initial:{rareCaughtCount:3,fishRngState:stateBeforeDraw(0xffffffff),player:{position:{x:-9,y:1,z:-9},yaw:Math.PI}}});hook(next);for(let i=0;i<2000&&next.getState().fishing.phase==='reeling'&&next.getState().gamePhase==='running';i++){const f=next.getState().fishing;next.dispatch({type:'pull',x:-f.pullDirection.x,y:-f.pullDirection.y});if(f.tension>75)next.dispatch({type:'primaryUp'});else if(f.tension<40)next.dispatch({type:'primaryDown'});next.step();}assert.equal(next.getState().rareCaughtCount,4);assert.equal(next.getState().events.filter(e=>e.type==='boss_spawn').length,0);
- const transfer=tradeGame([storedFish('eat-gold','golden'),storedFish('sell-gold','golden')],{position:{x:-6,y:1,z:-2},hunger:50});eat(transfer,'eat-gold');transfer.dispatch({type:'openShop'});sell(transfer,'sell-gold');assert.equal(transfer.getState().rareCaughtCount,0);assert.equal(transfer.getState().boss.state,'locked');
+ const next=new Game();next.reset({seed:1,fixture:'shore',initial:{rareCaughtCount:3,fishRngState:stateBeforeDraw(0xffffffff),player:{position:{x:6,y:1,z:-3},yaw:Math.PI}}});assert.equal(cast(next,60).accepted,true);next.advanceTicks(120);assert.equal(next.dispatch({type:'primaryDown'}).accepted,true);for(let i=0;i<2000&&next.getState().fishing.phase==='reeling'&&next.getState().gamePhase==='running';i++){const f=next.getState().fishing;next.dispatch({type:'pull',x:-f.pullDirection.x,y:-f.pullDirection.y});if(f.tension>75)next.dispatch({type:'primaryUp'});else if(f.tension<40)next.dispatch({type:'primaryDown'});next.step();}assert.equal(next.getState().rareCaughtCount,4);assert.equal(next.getState().events.filter(e=>e.type==='boss_spawn').length,0);
+ const transfer=tradeGame([storedFish('eat-gold','golden'),storedFish('sell-gold','golden')],{position:{x:-6,y:1,z:-2},hunger:50});eatFully(transfer,'eat-gold');transfer.dispatch({type:'openShop'});sell(transfer,'sell-gold');assert.equal(transfer.getState().rareCaughtCount,0);assert.equal(transfer.getState().boss.state,'locked');
 
 });
 
@@ -1088,7 +1088,10 @@ test('ink swept body hit deals ten once and destroys projectile; pausing warning
 });
 
 test('boss damage and starvation share a health baseline so hunger cannot heal away tentacle damage',()=>{
- const g=bossGame({player:{position:{x:0,y:1,z:9.7},hunger:19.5},inventory:[storedFish('food','golden')]});g.advanceTicks(1);close(g.getState().player.hp,85-1/30);g.advanceTicks(1);close(g.getState().player.hp,85-2/30);eat(g);const hp=g.getState().player.hp;g.advanceTicks(30);close(g.getState().player.hp,hp);
+ const g=bossGame({player:{position:{x:0,y:1,z:9.7},hunger:19.5},inventory:[storedFish('food','golden')]});g.advanceTicks(165);
+ close(g.getState().player.hp,85-165/30);g.dispatch({type:'eat',fishId:'food'});const hp=g.getState().player.hp;g.advanceTicks(30);
+ close(g.getState().player.hp,hp-1);assert.equal(g.getState().consumedFish.length,0);g.advanceTicks(90);
+ assert.equal(g.getState().consumedFish.length,1);assert.ok(g.getState().player.hp<=hp);assert.ok(g.getState().player.hunger>20);
 
 });
 
@@ -1135,7 +1138,7 @@ test('invalid or truncated save rejects atomically including duplicate IDs, nega
   for(const mutate of mutations){const v=structuredClone(valid);mutate(v);assert.throws(()=>game.importSave(v));assert.deepEqual(game.getState(),before);}assert.throws(()=>game.importSave(null));assert.throws(()=>game.importSave({version:1}));
 });
 test('menu saves the underlying world and consumption remains exclusive across repeated loads; restart leaves exported snapshot intact',()=>{
-  const game=fresh();game.reset({seed:1,fixture:'shore',initial:{player:{position:{x:-6,y:1,z:-2},hunger:80},coins:10,inventory:[{id:'sale',species:'bass'},{id:'food',species:'sprat'}]}});game.dispatch({type:'eat',fishId:'food'});game.dispatch({type:'openShop'});const value=game.exportSave();assert.equal(value.state.gamePhase,'running');game.dispatch({type:'restart',confirm:true});game.importSave(value);assert.equal(game.getState().ui.menu,'pause');assert.equal(game.getState().consumedFish.length,1);game.dispatch({type:'resume'});game.dispatch({type:'openShop'});game.dispatch({type:'sell',fishId:'sale'});assert.equal(game.getState().coins,30);assert.equal(game.dispatch({type:'sell',fishId:'sale'}).accepted,false);const sold=game.exportSave();game.importSave(sold);game.dispatch({type:'resume'});game.dispatch({type:'openShop'});assert.equal(game.dispatch({type:'sell',fishId:'sale'}).accepted,false);assert.equal(game.getState().coins,30);
+  const game=fresh();game.reset({seed:1,fixture:'shore',initial:{player:{position:{x:-6,y:1,z:-2},hunger:80},coins:10,inventory:[{id:'sale',species:'bass'},{id:'food',species:'sprat'}]}});game.dispatch({type:'eat',fishId:'food'});game.advanceTicks(120);game.dispatch({type:'openShop'});const value=game.exportSave();assert.equal(value.state.gamePhase,'running');game.dispatch({type:'restart',confirm:true});game.importSave(value);assert.equal(game.getState().ui.menu,'pause');assert.equal(game.getState().consumedFish.length,1);game.dispatch({type:'resume'});game.dispatch({type:'openShop'});game.dispatch({type:'sell',fishId:'sale'});assert.equal(game.getState().coins,30);assert.equal(game.dispatch({type:'sell',fishId:'sale'}).accepted,false);const sold=game.exportSave();game.importSave(sold);game.dispatch({type:'resume'});game.dispatch({type:'openShop'});assert.equal(game.dispatch({type:'sell',fishId:'sale'}).accepted,false);assert.equal(game.getState().coins,30);
 });
 test('terminal saves remain dead or victory on restore without publishing terminal rewards again',()=>{
   for(const hp of [0,100]){const game=fresh();game.reset({seed:1,fixture:'boss-arena',initial:{player:{hp},boss:{state:'defeated',hp:0,tentacleRemaining:4,inkRemaining:3}}});const value=game.exportSave();const phase=game.getState().gamePhase;game.importSave(value);assert.equal(game.getState().gamePhase,phase);assert.equal(game.getState().events.length,0);game.advanceTicks(600);assert.equal(game.getState().simulationTick,0);assert.equal(game.dispatch({type:'resume'}).accepted,false);}
@@ -1151,7 +1154,7 @@ test('corrupt moving entities, boss projectiles and internal clocks cannot parti
 });
 
 test('save and restore preserve actual sold and consumed deduplication and initial fish RNG on confirmed restart',()=>{
-  const game=fresh();game.reset({seed:7,fixture:'shore',initial:{fishRngState:1584200935,player:{position:{x:-6,y:1,z:-2},hunger:60},inventory:[{id:'food',species:'bass'},{id:'trade',species:'golden'}]}});game.dispatch({type:'eat',fishId:'food'});game.dispatch({type:'openShop'});game.dispatch({type:'sell',fishId:'trade'});const value=game.exportSave();game.importSave(value);assert.equal(game.getState().coins,120);assert.equal(game.getState().consumedFish[0].id,'food');assert.equal(game.getState().terminalFish[0].id,'trade');game.dispatch({type:'resume'});game.dispatch({type:'openShop'});assert.equal(game.dispatch({type:'sell',fishId:'trade'}).accepted,false);assert.equal(game.dispatch({type:'eat',fishId:'food'}).accepted,false);assert.equal(game.getState().coins,120);game.dispatch({type:'restart',confirm:true});assert.equal(game.getState().fishRngState,1584200935);
+  const game=fresh();game.reset({seed:7,fixture:'shore',initial:{fishRngState:1584200935,player:{position:{x:-6,y:1,z:-2},hunger:60},inventory:[{id:'food',species:'bass'},{id:'trade',species:'golden'}]}});game.dispatch({type:'eat',fishId:'food'});game.advanceTicks(120);game.dispatch({type:'openShop'});game.dispatch({type:'sell',fishId:'trade'});const value=game.exportSave();game.importSave(value);assert.equal(game.getState().coins,120);assert.equal(game.getState().consumedFish[0].id,'food');assert.equal(game.getState().terminalFish[0].id,'trade');game.dispatch({type:'resume'});game.dispatch({type:'openShop'});assert.equal(game.dispatch({type:'sell',fishId:'trade'}).accepted,false);assert.equal(game.dispatch({type:'eat',fishId:'food'}).accepted,false);assert.equal(game.getState().coins,120);game.dispatch({type:'restart',confirm:true});assert.equal(game.getState().fishRngState,1584200935);
   const corrupted=structuredClone(value);corrupted.state.terminalFish[0].id='food';const before=game.getState();assert.throws(()=>game.importSave(corrupted));assert.deepEqual(game.getState(),before);
 });
 

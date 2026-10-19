@@ -1,4 +1,4 @@
-import {playerSpace,overlapsIsland} from './locomotion.ts';
+import {overShopRoof,playerSpace,overlapsIsland} from './locomotion.ts';
 import type { GameState, Position } from './types.ts';
 import { STEP } from './types.ts';
 import { WEAPONS, isWeaponId } from './weapons.ts';
@@ -78,8 +78,8 @@ export function validateSave(value: unknown): SaveFile {
   const rare=integer(s.rareCaughtCount,'rareCaughtCount');
   const stats=object(s.stats,['caught','killed','sold','coinsEarned','bossDamageDealt'],'stats');for(const [key,value] of Object.entries(stats)) { if(key==='bossDamageDealt') number(value,`stats.${key}`,0,600); else integer(value,`stats.${key}`); }
   const velocity=number(r.velocityY,'velocityY');
-  if(s.locomotion==='swimming'&&velocity!==0)fail('swimming velocity');
-  if(s.locomotion==='ground'){const land=overlapsIsland(world,pp)&&Math.abs(pp.y-1)<1e-8;const roof=Math.abs(pp.y-SHOP.bottom-SHOP.height)<1e-8&&Math.abs(pp.x-SHOP.x)<=SHOP.halfWidth&&Math.abs(pp.z-SHOP.z)<=SHOP.halfDepth;if((!land&&!roof)||velocity!==0)fail('ground support');}
+  if(s.locomotion==='swimming'&&(velocity< -2||velocity>2))fail('swimming velocity');
+  if(s.locomotion==='ground'){const land=overlapsIsland(world,pp)&&Math.abs(pp.y-1)<1e-8;const roof=Math.abs(pp.y-SHOP.bottom-SHOP.height)<1e-8&&overShopRoof(pp);if((!land&&!roof)||velocity!==0)fail('ground support');}
   integer(r.initialFishRngState,'initialFishRngState',1,0xffffffff);
   integer(r.nextFishId,'nextFishId',1);integer(r.nextCastId,'nextCastId',1);integer(r.nextEventSequence,'nextEventSequence',1);
   const reserved=list(r.reservedFishIds,'reservedFishIds').map(id=>string(id,'reserved ID'));const reservedIds=new Set(reserved);if(reservedIds.size!==reserved.length) fail('reserved duplicate');

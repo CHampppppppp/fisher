@@ -1,7 +1,7 @@
-import {playerSpace,stepLocomotion} from './locomotion.ts';
+import {knockbackPlayer,overlapsIsland,playerSpace,stepLocomotion} from './locomotion.ts';
 import { PHYSICS, STEP } from './types.ts';
 import type { GameState, Position, FishingState, Fish } from './types.ts';
-import { canOccupy, makeWorld, landAtCenter,insideLand } from './world.ts';
+import { makeWorld, landAtCenter,insideLand } from './world.ts';
 import type { World } from './world.ts';
 import { castPreview, floatPitch, limitedLook, idleFishing, carriedPosition } from './fishing.ts';
 import { createReel, stepReel, isStruggling, reelSeed } from './reeling.ts';
@@ -12,7 +12,7 @@ import { attackTarget, attackFish, targetDistance } from './combat.ts';
 import { BOSS, BossSimulation, bossInitial } from './boss.ts';
 import { WEAPONS, isWeaponId } from './weapons.ts';
 import type { WeaponId } from './weapons.ts';
-import { FOOD, INVENTORY_CAPACITY, Survival, pickupTarget } from './survival.ts';
+import { FOOD, EAT_DURATION_TICKS, INVENTORY_CAPACITY, Survival, pickupTarget } from './survival.ts';
 import type { InventoryFish } from './types.ts';
 import { validateSave, SAVE_VERSION } from './save-format.ts';
 import type { SaveFile, SavedState } from './save-format.ts';
@@ -84,7 +84,7 @@ export class Game {
       rareCaughtCount:0,boss:new BossSimulation(makeWorld(fixture)).state,stats:{caught:0,killed:0,sold:0,coinsEarned:0,bossDamageDealt:0},
       mode: 'fishing',selectedSlot:0,locomotion:'ground',submerged:false,verticalInput:0,
       fishing: Object.assign(idleFishing(castPreview(makeWorld(fixture), { position: p, yaw, pitch, hp: 100, hunger: 100, oxygen:20 }, 0)),{directionRngState:reelSeed(seed||1)}),
-      fish: [], terminalFish: [], inventory: [], consumedFish: [], events: [],
+      fish: [], terminalFish: [], inventory: [], consumedFish: [], eating: { fishId: null, elapsedTicks: 0 }, events: [],
       attackCooldownRemaining: 0, attack: { sequence: 0, elapsed: .30, elapsedTicks:18, hand:'right', queued:false, hitCommitted:true, weaponId: 'fist', targetKind:null, hitId: null, result: 'none' },
       lastAction: { accepted: true, reason: 'reset' },
     };
@@ -258,8 +258,31 @@ export class Game {
 
   clearInput(): void {
     this.input = { forward: 0, strafe: 0, sprint: false };
+    this.state.verticalInput=0;
+    this.clearPrimaryInput();
+  }
+
+  clearPrimaryInput(): void {
     this.chargeHeld = false; this.state.fishing.holding = false;
-    this.combatHeld=false;this.state.verticalInput=0; this.state.attack.queued=false;
+    this.combatHeld=false; this.state.attack.queued=false;
+    this.cancelEating();
+  }
+
+  private cancelEating(): void {
+    this.state.eating.fishId = null; this.state.eating.elapsedTicks = 0;
+  }
+
+  private stepEating(): void {
+    const eating = this.state.eating;
+    if (eating.fishId === null) return;
+    if (++eating.elapsedTicks < EAT_DURATION_TICKS) return;
+    const index = this.state.inventory.findIndex(item => item.id === eating.fishId);
+    this.cancelEating();
+    if (index < 0 || this.state.player.hunger >= 100) return;
+    const [item] = this.state.inventory.splice(index, 1);
+    this.survival.eat(this.state.player, FOOD[item.species]);
+    this.state.consumedFish.push({id:item.id, species:item.species, state:'consumed', consumedTick:this.state.simulationTick});
+    this.publish('eat', item.id);
   }
 
   private cancelFishing(result: FishingState['result'] = 'cancelled', keepTelemetry = false): void {
@@ -423,7 +446,10 @@ export class Game {
     if(this.state.fish.some(f=>f.state==='carried'))return {accepted:false,reason:'carrying-fish'};
     const weapon=(['fist','club','spear','hammer'] as const)[index-1];
     if(weapon&&!this.state.unlockedWeapons.includes(weapon))return {accepted:false,reason:'weapon-locked'};
-    if(index!==this.state.selectedSlot){this.cancelFishing();this.state.attack.queued=false;}
+    if(index!==this.state.selectedSlot){
+      if(this.state.fishing.phase!=='idle')this.cancelFishing();
+      else this.clearPrimaryInput();
+    }
     this.state.selectedSlot=index;this.state.mode=index===0?'fishing':'combat';if(weapon)this.state.currentWeapon=weapon;
     return {accepted:true,reason:'selectSlot'};
   }
@@ -495,7 +521,7 @@ export class Game {
       if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-shop');
       if (action.type === 'openShop') { const result = this.openShop(); return finish(result.accepted, result.reason); }
       if (this.state.ui.menu !== 'shop') return finish(false, 'shop-not-open');
-      this.state.gamePhase='paused';this.state.ui.menu='pause';
+      this.state.gamePhase='running';this.state.ui.menu='none';
       this.clearInput(); return finish(true, 'closeShop');
     }
     if (action.type === 'sell') {
@@ -514,13 +540,13 @@ export class Game {
     if (action.type === 'eat') {
       if(this.state.gamePhase!=='running'||this.state.ui.menu!=='none')return finish(false,'paused');
       if (!onlyKeys(action, ['type','fishId']) || typeof action.fishId !== 'string') return finish(false, 'invalid-eat');
+      if (this.state.eating.fishId !== null) return finish(false, 'already-eating');
+      if (this.state.fishing.phase !== 'idle' || this.attackCooldownTicks > 0 || this.state.fish.some(f => f.state === 'carried')) return finish(false, 'hands-busy');
       const index = this.state.inventory.findIndex(item => item.id === action.fishId);
       if (index === -1) return finish(false, 'not-in-inventory');
       if (this.state.player.hunger >= 100) return finish(false, 'hunger-full');
-      const [item] = this.state.inventory.splice(index, 1);
-      this.survival.eat(this.state.player, FOOD[item.species]);
-      this.state.consumedFish.push({id:item.id, species:item.species, state:'consumed', consumedTick:this.state.simulationTick});
-      this.publish('eat', item.id); return finish(true, 'eat');
+      this.state.eating = { fishId: action.fishId, elapsedTicks: 0 };
+      return finish(true, 'eat');
     }
     if (action.type === 'pause' || action.type === 'resume') {
       if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-action');
@@ -547,6 +573,7 @@ export class Game {
       }
       case 'interact': {
         if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-interact');
+        if (this.state.eating.fishId !== null) return finish(false, 'already-eating');
         const access = shopAccess(this.state.player);
         if (access.valid) { const result = this.openShop(); return finish(result.accepted, result.reason); }
         const fish = this.state.fish.find(fish => fish.state === 'carried');
@@ -597,6 +624,7 @@ export class Game {
         this.cancelFishing(); return finish(true, 'cancelFishing');
       case 'primaryDown':
         if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-primary');
+        if (this.state.eating.fishId !== null) return finish(false, 'already-eating');
         if(this.state.selectedSlot>=5){if(this.combatHeld)return finish(false,'primary-held');this.combatHeld=true;const species=(['sprat','bass','tuna','golden'] as const)[this.state.selectedSlot-5],item=this.state.inventory.find(f=>f.species===species);return item?this.dispatch({type:'eat',fishId:item.id}):finish(false,'empty-slot');}
         if (this.state.mode === 'combat') {
           if(this.combatHeld) return finish(false,'primary-held');
@@ -639,6 +667,7 @@ export class Game {
       case 'primaryUp': {
         if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-primary');
         this.combatHeld=false;
+        this.cancelEating();
         if (this.state.mode === 'combat') return finish(true, 'primaryUp');
         if (this.state.fishing.phase === 'reeling') {
           this.state.fishing.holding = false; return finish(true, 'primaryUp');
@@ -677,14 +706,20 @@ export class Game {
       this.state.fishing.chargeSeconds = this.chargeTicks * STEP;
     }
     this.velocityY=stepLocomotion(this.world,this.state,this.input,this.velocityY);
-    if(!canOccupy(this.world,{...player.position,y:1})&&this.state.fishing.phase!=='idle')this.cancelFishing();
+    if(player.position.y<1&&!overlapsIsland(this.world,player.position)&&this.state.fishing.phase!=='idle')this.cancelFishing();
     this.stepFishing(); this.stepFishLife(); this.syncCarriedFish();
     const previousHp = player.hp;let bossKilledPlayer=false;
-    this.bossSimulation.step(this.state.simulationTick,player,amount=>{
+    const wasJumping=this.state.boss.jumpPhase==='jumping';
+    this.bossSimulation.step(this.state.simulationTick,player,(amount,direction)=>{
       this.survival.damage(player,amount);if(player.hp===0) bossKilledPlayer=true;
+      knockbackPlayer(this.world,this.state,direction,BOSS.playerKnockback);
     });
+    this.syncCarriedFish();
+    if(wasJumping&&this.state.boss.jumpPhase==='cooldown'&&this.state.boss.state==='active')
+      this.publish('boss_slam',BOSS.id,undefined,{...this.state.boss.position,y:landAtCenter(this.world,this.state.boss.position)?1:0});
     const drowned=this.state.submerged&&player.oxygen<=1e-9;
     player.oxygen=Math.max(0,Math.min(20,player.oxygen+(this.state.submerged?-1:4)*STEP));
+    if (player.hp > 0 && this.state.boss.state !== 'defeated') this.stepEating();
     this.survival.step(player);if(drowned)this.survival.damage(player,10*STEP);
     if (player.hp < previousHp) this.publish('player_damage', 'player');
     if (player.hp === 0) this.die(drowned?'drowning':bossKilledPlayer?'boss':'starvation');

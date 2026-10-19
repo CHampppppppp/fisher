@@ -5,7 +5,7 @@ import {SHOP,landAtCenter} from './world.ts';
 import { shopBlocks } from './fishing.ts';
 
 export const BOSS = Object.freeze({ id: 'octopus', hp: 600, radius: 2, tentacleTicks: 240, warningTicks: 72,
-  activeTicks: 18, tentacleDamage: 15, inkTicks: 180, inkWarningTicks: 48, inkSpeed: 6, inkLifeTicks: 300, inkRadius: .18, inkDamage: 10 });
+  activeTicks: 18, tentacleDamage: 15, slamRadius: 2.5, slamDamage: 15, playerKnockback: 1.2, inkTicks: 180, inkWarningTicks: 48, inkSpeed: 6, inkLifeTicks: 300, inkRadius: .18, inkDamage: 10 });
 
 export function bossInitial(rareCaughtCount: number, value?: unknown): InitialBoss {
   if (value === undefined) return rareCaughtCount < 3
@@ -115,15 +115,24 @@ export class BossSimulation {
     }
   }
 
-  step(tick: number, player: Player, applyDamage: (amount:number)=>void): void {
+  step(tick: number, player: Player, applyDamage: (amount:number,direction:{x:number;z:number})=>void): void {
     if(this.state.state==='locked'||tick===this.bornTick) return;
-    const damage=(amount:number)=>{if(this.state.contactProtectionTicks>0)return;applyDamage(amount);this.state.contactProtectionTicks=60;};
+    const damage=(amount:number,source:Position,incoming?:Position)=>{
+      if(this.state.contactProtectionTicks>0)return;
+      let x=incoming?.x??player.position.x-source.x,z=incoming?.z??player.position.z-source.z;
+      let length=Math.hypot(x,z);
+      if(length<1e-10){x=player.position.x-this.state.position.x;z=player.position.z-this.state.position.z;length=Math.hypot(x,z);}
+      if(length<1e-10){x=-Math.sin(player.yaw);z=-Math.cos(player.yaw);length=1;}
+      applyDamage(amount,{x:x/length,z:z/length});this.state.contactProtectionTicks=60;
+    };
     if(this.state.contactProtectionTicks>0)this.state.contactProtectionTicks--;
     if(this.state.state==='active'){
+      const wasJumping=this.state.jumpPhase==='jumping';
       this.leap(player);const p=this.state.position,q=player.position;
-      const radial=Math.max(0,Math.hypot(p.x-q.x,p.z-q.z)-BODY.radius);
-      const vertical=Math.max(q.y-p.y,0,p.y-q.y-BODY.height);
-      if(Math.hypot(radial,vertical)<=BOSS.radius+1e-9)damage(15);
+      const surface=landAtCenter(this.world,p)?1:0;
+      if(wasJumping&&this.state.jumpPhase==='cooldown'&&
+        Math.hypot(p.x-q.x,p.z-q.z)<=BOSS.slamRadius+BODY.radius+1e-9&&
+        q.y<=surface+.5+1e-9&&q.y+BODY.height>=surface-1e-9)damage(BOSS.slamDamage,p);
     }
     const enteringPhase2=this.state.state==='active' && this.state.hp<=300 && this.state.phase===1;
     if(enteringPhase2) { this.state.phase=2;this.inkTicks=BOSS.inkTicks;this.state.inkRemaining=3; }
@@ -137,13 +146,13 @@ export class BossSimulation {
       } else if(attack.type==='tentacle') left--;
       if(attack.type==='tentacle' && attack.phase==='active' && left>0 && !attack.hit &&
         Math.hypot(player.position.x-attack.position.x,player.position.z-attack.position.z)<=attack.radius+1e-9) {
-        attack.hit=true;damage(BOSS.tentacleDamage);
+        attack.hit=true;damage(BOSS.tentacleDamage,attack.position);
       }
       if(attack.type==='ink' && attack.phase==='flying' && !fired) {
         const from=attack.position;const distance=BOSS.inkSpeed*STEP;
         const to={x:from.x+attack.direction.x*distance,y:from.y+attack.direction.y*distance,z:from.z+attack.direction.z*distance};attack.position=to;
         if(shopBlocks(from,to)) { this.attackTicks.delete(attack.id);return false; }
-        if(hitsPlayer(from,to,player)) { damage(BOSS.inkDamage);this.attackTicks.delete(attack.id);return false; }
+        if(hitsPlayer(from,to,player)) { damage(BOSS.inkDamage,from,attack.direction);this.attackTicks.delete(attack.id);return false; }
         left--;
       }
       if(left<=0) { this.attackTicks.delete(attack.id);return false; }

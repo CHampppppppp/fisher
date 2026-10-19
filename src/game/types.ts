@@ -91,6 +91,7 @@ export interface GameState {
   terminalFish: TerminalFish[];
   inventory: InventoryFish[];
   consumedFish: ConsumedFish[];
+  eating: { fishId: string | null; elapsedTicks: number };
   attackCooldownRemaining: number;
   attack: { sequence: number; elapsed: number; elapsedTicks:number; hand:"left"|"right"; queued:boolean; hitCommitted:boolean; weaponId: WeaponId; targetKind: 'fish' | 'boss' | null; hitId: string | null; result: 'none' | 'miss' | 'hit' | 'kill' };
   events: GameEvent[];

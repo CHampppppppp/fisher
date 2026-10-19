@@ -9,6 +9,7 @@ import {ImpactView} from './impact-view.ts';
 import { FistView } from './fist-view.ts';
 import { BossView } from './boss-view.ts';
 import { SHOP_COUNTER } from '../game/shop.ts';
+import { createShopShell } from './shop-model.ts';
 
 const palette = {
   sand: 0xe6cc94, wood: 0xd8c096, darkWood: 0x635846, roof: 0xb96950,
@@ -114,13 +115,9 @@ export class IslandView {
   }
 
   private shop(): void {
-    const { x, z, height, bottom } = SHOP;
+    const { x, z } = SHOP;
     // Solid rear and side walls, a counter below an open front window.
-    this.box(3,height,.15,palette.wood,x,bottom+height/2,z+1.42);
-    for(const dx of [-1.42,1.42])this.box(.15,height,3,palette.wood,x+dx,bottom+height/2,z);
-    this.box(3,1.05,.32,palette.darkWood,x,1.525,z-1.42);
-    this.box(3.2,.12,.65,palette.wood,x,2.08,z-1.55);
-    for(const dx of [-1.42,1.42])this.box(.15,height,.15,palette.darkWood,x+dx,bottom+height/2,z-1.42);
+    this.island.add(createShopShell());
     // Merchant stands behind the real interaction counter, facing the player.
     this.box(.6,.85,.4,0x365e54,x,2.25,z-.6);
     this.add(new THREE.SphereGeometry(.25,12,8),0xc99570,x,2.96,z-.6);
@@ -128,10 +125,6 @@ export class IslandView {
     for(const dx of [-.09,.09])this.add(new THREE.SphereGeometry(.027,6,4),0x252a25,x+dx,2.99,z-.82);
     for(const dx of [-.38,.38]){this.box(.16,.6,.18,0x365e54,x+dx,2.25,z-.7);this.box(.16,.14,.25,0xc99570,x+dx,2.12,z-1);}
     for(const dx of [-.18,.18])this.box(.2,.65,.25,0x413e35,x+dx,1.45,z-.6);
-    for (const dx of [-0.95, 0.95]) {
-      const roof = this.box(2.05, 0.14, 3.7, palette.roof, x + dx * 0.8, 4.96, z);
-      roof.rotation.z = -Math.sign(dx) * 0.37;
-    }
     this.label('海风补给', 'E · 出售 / 购买武器', SHOP_COUNTER.x, 3.82, SHOP_COUNTER.z, 2.65);
 
     // Decoration stays beside the building and has no interaction in this stage.

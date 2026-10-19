@@ -21,7 +21,7 @@ export class BossView {
   constructor(scene: THREE.Scene) {
     this.root.name='boss-and-attacks';scene.add(this.root);this.root.add(this.body);this.body.scale.z=-1;
     this.root.add(this.jumpMarker);this.jumpMarker.name='boss-jump-warning';
-    const landing=new THREE.Mesh(new THREE.TorusGeometry(2,.08,8,48),new THREE.MeshBasicMaterial({color:0xffab4c,transparent:true,opacity:.8}));landing.rotation.x=-Math.PI/2;this.jumpMarker.add(landing);
+    const landing=new THREE.Mesh(new THREE.TorusGeometry(BOSS.slamRadius,.08,8,48),new THREE.MeshBasicMaterial({color:0xffab4c,transparent:true,opacity:.8,depthWrite:false}));landing.rotation.x=-Math.PI/2;this.jumpMarker.add(landing);
     const head=new THREE.Mesh(new THREE.SphereGeometry(BOSS.radius,32,20),this.skin);head.castShadow=true;head.name='boss-body-collider';this.body.add(head);
     for(const x of [-.57,.57]) {
       const eye=new THREE.Mesh(new THREE.SphereGeometry(.25,12,8),new THREE.MeshStandardMaterial({color:0xf1e0b7}));eye.position.set(x,.66,-1.81);this.body.add(eye);
@@ -63,7 +63,11 @@ export class BossView {
 
   update(state: GameState): void {
     const boss=state.boss;this.body.visible=boss.state!=='locked';this.body.position.set(boss.position.x,boss.position.y,-boss.position.z);
-    this.jumpMarker.visible=boss.state==='active'&&boss.jumpPhase==='warning';this.jumpMarker.position.set(boss.target.x,boss.target.y===3?1.03:.07,-boss.target.z);
+    const slam=state.events.findLast(e=>e.type==='boss_slam');
+    const slamAge=slam?(state.simulationTick-slam.tick)/60:Infinity;
+    this.jumpMarker.visible=boss.state==='active'&&(boss.jumpPhase==='warning'||slamAge<.3);
+    this.jumpMarker.position.set(boss.target.x,boss.target.y===3?1.03:.07,-boss.target.z);
+    this.jumpMarker.scale.setScalar(boss.jumpPhase==='warning'||slamAge>=.3?1:1+slamAge*2);
     const defeated=boss.state==='defeated';this.body.rotation.y=Math.atan2(state.player.position.x-boss.position.x,-state.player.position.z+boss.position.z);
     this.body.rotation.z=boss.jumpPhase==='jumping'?Math.sin((45-boss.jumpTicks)/45*Math.PI*4)*.18:boss.jumpPhase==='warning'?Math.sin(state.simulationTick)*.06:0;
     this.body.scale.set(defeated ? .55 : 1,defeated ? .3 : 1,defeated ? -.55 : -1);

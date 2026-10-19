@@ -7,10 +7,11 @@ test('v2 boss warning locks a jump, lands on shore and uses its independent rand
  g.dispatch({type:'move',forward:0,strafe:1,sprint:false});g.advanceTicks(30);assert.equal(g.getState().boss.jumpPhase,'jumping');assert.deepEqual(g.getState().boss.target,target);
  g.advanceTicks(45);assert.equal(g.getState().boss.jumpPhase,'cooldown');assert.equal(g.getState().boss.position.y,3);assert.equal(g.getState().boss.cooldownTicks,60);assert.equal(g.getState().fishRngState,rng);
 });
-test('v2 boss contact shares exactly sixty ticks protection and freezes in menus',()=>{
+test('v2 boss contact is harmless and a landing shares sixty ticks protection and freezes in menus',()=>{
  const g=arena();g.reset({seed:1,fixture:'boss-arena',initial:{player:{position:{x:0,y:1,z:9.7}}}});
+ g.advanceTicks(164);assert.equal(g.getState().player.hp,100);assert.equal(g.getState().boss.contactProtectionTicks,0);
  g.advanceTicks(1);assert.equal(g.getState().player.hp,85);assert.equal(g.getState().boss.contactProtectionTicks,60);
- g.advanceTicks(59);assert.equal(g.getState().player.hp,85);g.advanceTicks(1);assert.equal(g.getState().player.hp,70);
+ g.advanceTicks(59);assert.equal(g.getState().player.hp,85);g.advanceTicks(1);assert.equal(g.getState().player.hp,85);
  g.dispatch({type:'pause'});const s=g.getState();g.advanceTicks(600);assert.deepEqual(g.getState(),s);
 });
 test('v2 a boss mid-jump save restores endpoints clocks and deterministic continuation',()=>{
