@@ -2,7 +2,7 @@ import { Game } from './game.ts';
 import type { GameState, ResetOptions } from './types.ts';
 
 export interface ReplayOptions extends ResetOptions { inputs: {tick:number;action:unknown}[]; totalTicks:number; renderHz:30|60|120 }
-const ACTIONS=['move','look','jump','pause','resume','setMode','primaryDown','primaryUp','cancelFishing','interact','eat','sell','buy','equip','openInventory','closeInventory','openShop','closeShop','openSettings','closeSettings','updateSettings','save','load','restart'];
+const ACTIONS=['pull','selectSlot','cycleSlot','swim','move','look','jump','pause','resume','setMode','primaryDown','primaryUp','cancelFishing','interact','eat','sell','buy','equip','openInventory','closeInventory','openShop','closeShop','openSettings','closeSettings','updateSettings','save','load','restart'];
 function record(value:unknown):value is Record<string,unknown>{return !!value&&typeof value==='object'&&!Array.isArray(value)&&Object.getPrototypeOf(value)===Object.prototype;}
 
 export function validateReplay(value:unknown):ReplayOptions {

@@ -10,14 +10,15 @@ test('real E key and visible button place carried fish; invalid water/body place
     { id: 'held', species: 'bass', state: 'carried', position: { x: 0, y: 1, z: 3.5 }, jumpTimer: 0 },
   ] } }));
   await reset(); await expect(page.locator('#place-fish')).toBeVisible();
-  await page.keyboard.press('Escape'); await page.getByRole('button', { name: '继续探索' }).click();
+  await page.keyboard.press('Escape'); await page.getByRole('button', { name: '继续游戏' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
   await page.keyboard.press('KeyE');
   let state = await page.evaluate(() => window.__islandTest!.getState());
   expect(state.fish).toHaveLength(1); expect(state.fish[0].state).toBe('groundedAlive');
   await expect(page.locator('#place-fish')).toBeHidden(); await expect(page.locator('#live-fish-status')).toContainText('岩鲈鱼');
   await page.screenshot({ path: test.info().outputPath('placed-bass-1280.png') });
-  await reset(); await page.keyboard.press('Tab'); await page.locator('#close-inventory').click(); await page.locator('#place-fish').click();
+  await page.keyboard.press('Escape'); await expect.poll(()=>page.evaluate(()=>Boolean(document.pointerLockElement))).toBe(false);
+  await reset(); await page.locator('#place-fish').click();
   state = await page.evaluate(() => window.__islandTest!.getState()); expect(state.fish[0].state).toBe('groundedAlive');
   expect(state.events.filter(event => event.type === 'fish_place')).toHaveLength(1);
   for (const [position, pitch, reason] of [
@@ -56,7 +57,7 @@ test('four live fish warn and animate actual jumps; blur freezes midair then exp
     await page.screenshot({ path: test.info().outputPath(`${species}-jump-1920.png`) });
     await page.evaluate(() => window.dispatchEvent(new Event('blur'))); const paused = await page.evaluate(() => window.__islandTest!.getState());
     await page.evaluate(() => window.__islandTest!.advanceTicks(300)); expect(await page.evaluate(() => window.__islandTest!.getState())).toEqual(paused);
-    await page.getByRole('button', { name: '继续探索' }).click();
+    await page.getByRole('button', { name: '继续游戏' }).click();
     await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
     await page.evaluate(() => window.__islandTest!.advanceTicks(12));
     const landed = await page.evaluate(() => window.__islandTest!.getState());

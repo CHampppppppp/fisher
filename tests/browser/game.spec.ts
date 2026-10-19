@@ -5,7 +5,7 @@ declare global { interface Window { __islandTest?: IslandTest } }
 
 test('only test URL exposes adapter; manual simulation matches rendered HUD', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
-  await page.goto('/'); await expect(page.getByRole('button', { name: '开始探索' })).toBeVisible();
+  await page.goto('/'); await expect(page.getByRole('button', { name: '开始游戏' })).toBeVisible();
   expect(await page.evaluate(() => '__islandTest' in window)).toBe(false);
   await page.goto('/?test=1');
   const result = await page.evaluate(async () => {
@@ -54,33 +54,33 @@ test('invalid resets are atomic, shore and shop stop the body', async ({ page })
 });
 
 test('normal game Pointer Lock, Esc, blur and hidden pause until explicit continue', async ({ page }) => {
-  await page.goto('/'); await page.getByRole('button', { name: '开始探索' }).click();
+  await page.goto('/'); await page.getByRole('button', { name: '开始游戏' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
   await page.keyboard.down('w'); await page.waitForTimeout(150); await page.keyboard.press('Escape');
-  await expect(page.getByRole('button', { name: '继续探索' })).toBeVisible();
-  await page.getByRole('button', { name: '继续探索' }).click();
+  await expect(page.getByRole('button', { name: '继续游戏' })).toBeVisible();
+  await page.getByRole('button', { name: '继续游戏' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
   await page.keyboard.down('w'); await page.evaluate(() => window.dispatchEvent(new Event('blur')));
-  await expect(page.getByRole('button', { name: '继续探索' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '继续游戏' })).toBeVisible();
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
-  await expect(page.getByRole('button', { name: '继续探索' })).toBeVisible();
-  await page.getByRole('button', { name: '继续探索' }).click();
+  await expect(page.getByRole('button', { name: '继续游戏' })).toBeVisible();
+  await page.getByRole('button', { name: '继续游戏' }).click();
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true });
     document.dispatchEvent(new Event('visibilitychange'));
   });
-  await expect(page.getByRole('button', { name: '继续探索' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '继续游戏' })).toBeVisible();
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: false });
     document.dispatchEvent(new Event('visibilitychange'));
   });
-  await expect(page.getByRole('button', { name: '继续探索' })).toBeVisible();
+  await expect(page.getByRole('button', { name: '继续游戏' })).toBeVisible();
 });
 
 test('held keyboard input is released on blur, pause and reset in the production controller', async ({ page }) => {
   await page.goto('/?test=1');
   await page.evaluate(() => window.__islandTest!.reset({ seed: 1, fixture: 'shore' }));
-  await page.keyboard.press('Escape'); await page.getByRole('button', { name: '继续探索' }).click();
+  await page.keyboard.press('Escape'); await page.getByRole('button', { name: '继续游戏' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
   await page.keyboard.down('w'); await page.evaluate(() => window.__islandTest!.advanceTicks(60));
   const moving = await page.evaluate(() => window.__islandTest!.getState());
@@ -89,7 +89,7 @@ test('held keyboard input is released on blur, pause and reset in the production
   const frozen = await page.evaluate(() => window.__islandTest!.getState());
   await page.evaluate(() => window.__islandTest!.advanceTicks(300));
   expect(await page.evaluate(() => window.__islandTest!.getState())).toEqual(frozen);
-  await page.getByRole('button', { name: '继续探索' }).click();
+  await page.getByRole('button', { name: '继续游戏' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
   // OS key-repeat can arrive after refocusing while W is still physically held.
   await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW', repeat: true, bubbles: true })));
@@ -105,11 +105,11 @@ for (const [width, height] of [[1280, 720], [1920, 1080]]) {
   test(`menus and HUD fit ${width}x${height}`, async ({ page }) => {
     const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
     await page.setViewportSize({ width, height }); await page.goto('/');
-    await expect(page.getByRole('button', { name: '开始探索' })).toBeInViewport();
+    await expect(page.getByRole('button', { name: '开始游戏' })).toBeInViewport();
     await page.screenshot({ path: test.info().outputPath(`start-${width}.png`) });
-    await page.getByRole('button', { name: '开始探索' }).click();
+    await page.getByRole('button', { name: '开始游戏' }).click();
     await expect(page.locator('#hud')).toBeVisible();
-    for (const id of ['hp-value', 'hunger-value', 'coins-value', 'controls']) await expect(page.locator(`#${id}`)).toBeInViewport();
+    for (const id of ['hp-value', 'hunger-value', 'coins-value', 'weapon-bar']) await expect(page.locator(`#${id}`)).toBeInViewport();
     await page.screenshot({ path: test.info().outputPath(`hud-${width}.png`) });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(errors).toEqual([]);

@@ -10,10 +10,10 @@ async function readyAtNorthShore(page: import('@playwright/test').Page) {
   }));
 }
 
-test('normal mouse input casts; Q and mouse-accessible buttons switch/cancel', async ({ page }) => {
+test('native mouse casts; explicit pointer-free resume exposes real switch/cancel buttons', async ({ page }) => {
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   await readyAtNorthShore(page);
-  await page.keyboard.press('Escape'); await page.getByRole('button', { name: '继续探索' }).click();
+  await page.keyboard.press('Escape'); await page.getByRole('button', { name: '继续游戏' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
   await page.mouse.down(); await page.evaluate(() => window.__islandTest!.advanceTicks(30));
   await page.evaluate(() => window.__islandTest!.dispatch({ type: 'setMode', mode: 'fishing' }));
@@ -26,7 +26,10 @@ test('normal mouse input casts; Q and mouse-accessible buttons switch/cancel', a
   await page.keyboard.press('Tab');
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(false);
   await expect(page.locator('#inventory-menu')).toBeVisible();
-  await page.locator('#close-inventory').click(); // Tab now freezes in inventory; close before using gameplay HUD buttons.
+  await page.locator('#close-inventory').click(); // Closing now returns to pause; explicitly continue.
+  // HUD button coverage uses an explicit production resume with the cursor free.
+  // Native continue/Pointer Lock is covered by game/menu/playtest scenarios.
+  await page.evaluate(()=>window.__islandTest!.dispatch({type:'resume'}));
   await page.locator('#cancel-fishing').click();
   expect((await page.evaluate(() => window.__islandTest!.getState())).fishing.phase).toBe('idle');
   await page.locator('#mode-button').click();
@@ -36,7 +39,8 @@ test('normal mouse input casts; Q and mouse-accessible buttons switch/cancel', a
   await page.keyboard.press('KeyQ'); expect((await page.evaluate(() => window.__islandTest!.getState())).mode).toBe('combat');
   await page.locator('#mode-button').click();
   expect((await page.evaluate(() => window.__islandTest!.getState())).mode).toBe('fishing');
-  await page.locator('#world').click({ position: { x: 640, y: 360 } });
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', {name:'继续游戏',exact:true}).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
   expect((await page.evaluate(() => window.__islandTest!.getState())).fishing.phase).toBe('idle');
   await page.keyboard.press('KeyQ'); expect((await page.evaluate(() => window.__islandTest!.getState())).mode).toBe('combat');

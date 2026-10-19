@@ -30,7 +30,9 @@ test('real-clock native keyboard and mouse complete fishing, chase, food, sales,
   }
   async function ensureLock(){
     if(await page.evaluate(()=>Boolean(document.pointerLockElement)))return;
-    const size=page.viewportSize()!;await page.locator('#world').click({position:{x:size.width/2,y:size.height/2}});
+    const size=page.viewportSize()!;
+    if(await page.locator('#menu').isVisible()) await page.locator('#play-button').click();
+    else await page.locator('#world').click({position:{x:size.width/2,y:size.height/2}});
     await expect.poll(()=>page.evaluate(()=>Boolean(document.pointerLockElement))).toBe(true);
     mx=page.viewportSize()!.width/2;my=page.viewportSize()!.height/2;await page.mouse.move(mx,my);await page.waitForTimeout(15);
   }
@@ -104,14 +106,14 @@ test('real-clock native keyboard and mouse complete fishing, chase, food, sales,
   }
   try{
     await page.goto('/?test=1&clock=real');await page.evaluate(()=>window.__islandTest!.reset({seed:45734,fixture:'shore',initial:{player:{position:{x:0,y:1,z:-5},yaw:Math.PI}}}));
-    await page.keyboard.press('Escape');await page.getByRole('button',{name:'继续探索',exact:true}).click();await expect.poll(()=>page.evaluate(()=>Boolean(document.pointerLockElement))).toBe(true);await page.mouse.move(mx,my);await note('public-preparation-only-seed-and-player');
+    await page.keyboard.press('Escape');await page.getByRole('button',{name:'继续游戏',exact:true}).click();await expect.poll(()=>page.evaluate(()=>Boolean(document.pointerLockElement))).toBe(true);await page.mouse.move(mx,my);await note('public-preparation-only-seed-and-player');
     await catchFish('tuna');await sell(await hunt(),'club');
     await catchFish('sprat');const food=await hunt();await page.keyboard.press('Tab');await page.locator(`#inventory-list [data-fish-id="${food}"]`).click();const hunger=(await read()).player.hunger;await page.locator('#eat-button').click();expect((await read()).player.hunger).toBeGreaterThan(hunger);expect((await read()).consumedFish[0].id).toBe(food);await page.locator('#close-inventory').click();await ensureLock();await note('ate-real-sprat');
     for(let i=0;i<3;i++){await catchFish('golden');await sell(await hunt(),i===2?'hammer':undefined);}
     let s=await read();expect(s.rareCaughtCount).toBe(3);expect(s.boss.state).toBe('active');expect(s.events.filter(e=>e.type==='boss_spawn')).toHaveLength(1);expect(s.coins).toBe(75);expect(s.stats).toMatchObject({caught:5,killed:5,sold:4});
-    await walk(0,9.2,true);await page.keyboard.press('Escape');await page.getByRole('button',{name:'保存进度',exact:true}).click();await expect(page.locator('#menu .storage-status')).toContainText('已保存');await note('saved-active-real-boss');
+    await walk(0,9.2,true);await page.keyboard.press('Escape');await page.getByRole('button',{name:'保存游戏',exact:true}).click();await expect(page.locator('#menu .storage-status')).toContainText('已保存');await note('saved-active-real-boss');
     await page.reload();await page.getByRole('button',{name:'读取存档',exact:true}).click();await expect(page.locator('#menu .storage-status')).toContainText('已读取');s=await read();expect(s.gamePhase).toBe('paused');expect(s.coins).toBe(75);expect(s.rareCaughtCount).toBe(3);expect(s.stats.caught).toBe(5);await note('loaded-real-indexeddb-paused');
-    await page.getByRole('button',{name:'继续探索',exact:true}).click();await expect.poll(()=>page.evaluate(()=>Boolean(document.pointerLockElement))).toBe(true);mx=page.viewportSize()!.width/2;my=page.viewportSize()!.height/2;await page.mouse.move(mx,my);
+    await page.getByRole('button',{name:'继续游戏',exact:true}).click();await expect.poll(()=>page.evaluate(()=>Boolean(document.pointerLockElement))).toBe(true);mx=page.viewportSize()!.width/2;my=page.viewportSize()!.height/2;await page.mouse.move(mx,my);
     const seen=new Set<string>();const start=Date.now();let warningCaptured=false;let phase2Captured=false;
     while((await read()).gamePhase==='running'){
       s=await read();const warning=s.boss.attacks.find(a=>a.phase==='warning'&&!seen.has(a.id));

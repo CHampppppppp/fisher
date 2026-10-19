@@ -20,7 +20,7 @@ test('actual bite click/release controls reel; blur/continue freezes and release
     };
   });
   await ready(page); expect(await page.evaluate(() => window.__audioCreated)).toBe(0);
-  await page.keyboard.press('Escape'); await page.getByRole('button', { name: '继续探索' }).click();
+  await page.keyboard.press('Escape'); await page.getByRole('button', { name: '继续游戏' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
   await page.mouse.down(); await page.evaluate(() => window.__islandTest!.advanceTicks(30)); await page.mouse.up();
   await page.evaluate(() => window.__islandTest!.advanceTicks(119));
@@ -37,7 +37,7 @@ test('actual bite click/release controls reel; blur/continue freezes and release
   const paused = await page.evaluate(() => window.__islandTest!.getState());
   await page.evaluate(() => window.__islandTest!.advanceTicks(300));
   expect(await page.evaluate(() => window.__islandTest!.getState())).toEqual(paused);
-  await page.getByRole('button', { name: '继续探索' }).click();
+  await page.getByRole('button', { name: '继续游戏' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
   await page.evaluate(() => window.__islandTest!.advanceTicks(6));
   const resumed = await page.evaluate(() => window.__islandTest!.getState());
@@ -63,9 +63,10 @@ test('seed=1 real 40/75 loop creates one fish/event, rejects another cast, confi
   expect(landing[0].entityId).toBe(state.fish[0].id); expect(state.fishing.phase).toBe('idle');
   expect((await page.evaluate(() => window.__islandTest!.dispatch({ type: 'primaryDown' }))).reason).toBe('carrying-fish');
   await expect(page.locator('#fishing-status')).toContainText('银鳍鱼');
-  await expect(page.locator('#restart-button')).toBeVisible();
+  await expect(page.locator('#place-fish')).toBeVisible();
   await page.screenshot({ path: test.info().outputPath('carried-1280.png') });
-  page.once('dialog', dialog => dialog.accept()); await page.locator('#restart-button').click();
+  await page.keyboard.press('Escape'); await expect(page.locator('#hud')).toBeHidden();
+  page.once('dialog', dialog => dialog.accept()); await page.locator('#pause-restart').click();
   const restarted = await page.evaluate(() => window.__islandTest!.getState());
   expect(restarted.fish).toHaveLength(0); expect(restarted.simulationTick).toBe(0); expect(restarted.events.map(event => event.type)).toEqual(['restart']);
   expect(restarted.fishRngState).toBe(1);

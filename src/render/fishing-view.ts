@@ -1,3 +1,4 @@
+import {carriedPosition} from '../game/fishing.ts';
 import * as THREE from 'three';
 import { STEP } from '../game/types.ts';
 import type { GameState } from '../game/types.ts';
@@ -69,6 +70,16 @@ export class FishingView {
       const model = createFishModel(species); model.visible = false;
       this.fishModels.set(species, model); this.carried.add(model);
     }
+    for(const side of [-1,1]) {
+      const palm=new THREE.Mesh(new THREE.BoxGeometry(.16,.10,.22),new THREE.MeshBasicMaterial({color:0xd7a57c}));
+      palm.position.set(side*.23,-.14,.04);palm.rotation.z=side*.22;this.carried.add(palm);
+      const arm=new THREE.Mesh(new THREE.BoxGeometry(.13,.13,.35),new THREE.MeshBasicMaterial({color:0x365e54}));
+      arm.position.set(side*.27,-.19,.27);arm.rotation.x=-.18;this.carried.add(arm);
+      for(let i=0;i<3;i++) {
+        const finger=new THREE.Mesh(new THREE.BoxGeometry(.04,.08,.12),new THREE.MeshBasicMaterial({color:0xe7b58b}));
+        finger.position.set(side*(.14+i*.045),-.08,-.05);this.carried.add(finger);
+      }
+    }
     this.world.add(this.carried);
   }
 
@@ -76,17 +87,20 @@ export class FishingView {
     const { fishing } = state;
     const active = state.mode === 'fishing';
     const waiting = fishing.cast !== null;
-    const fish = state.fish.find(fish => fish.state === 'carried');
-    this.carried.visible = Boolean(fish);
+    const live=state.fish.find(fish=>fish.state==='carried');
+    const species=(['sprat','bass','tuna','golden'] as const)[state.selectedSlot-5];
+    const corpse=state.inventory.find(f=>f.species===species);
+    const fish=live??(corpse?{...corpse,position:carriedPosition(state.player)}:undefined);
+    this.carried.visible = Boolean(fish) && state.gamePhase === 'running';
     for (const [species, model] of this.fishModels) model.visible = fish?.species === species;
     if (fish) {
       this.carried.name = `carried-${fish.id}`;
       this.carried.position.set(fish.position.x, fish.position.y, -fish.position.z);
       this.carried.quaternion.copy(this.camera.quaternion);
     }
-    this.rod.visible = active && !fish;
+    this.rod.visible = active && !fish && state.attackCooldownRemaining===0 && state.gamePhase === 'running';
     this.bobber.visible = waiting; this.line.visible = waiting;
-    this.preview.visible = (Boolean(fish) || (active && !waiting)) && state.gamePhase === 'running';
+    this.preview.visible = (Boolean(live) || (active && !waiting)) && state.gamePhase === 'running';
     const targetBend = fishing.phase === 'charging' ? fishing.chargeSeconds * 0.32
       : fishing.phase === 'reeling' ? 0.10 + fishing.tension * 0.003 + (fishing.struggling ? 0.045 : 0) : 0;
     if (state.simulationTick < this.lastTick || this.lastTick < 0) this.bend = targetBend;
@@ -95,7 +109,12 @@ export class FishingView {
       this.bend += (targetBend - this.bend) * (1 - Math.exp(-delta * 15));
     }
     this.lastTick = state.simulationTick;
-    this.rod.rotation.x = -this.bend;
+    const castAge=(state.simulationTick-fishing.lastCastTick)*STEP;
+    const castSwing=castAge>=0&&castAge<.35?-.36*Math.sin(castAge/.35*Math.PI):0;
+    this.rod.rotation.x = fishing.phase==='charging'?this.bend:castSwing+
+      (fishing.phase==='reeling'?-.08+fishing.rodOffset.y*.24+fishing.pullDirection.y*fishing.tension/100*.18:0);
+    this.rod.rotation.y = fishing.phase==='reeling'?-(fishing.rodOffset.x*.32+fishing.pullDirection.x*fishing.tension/100*.20):0;
+    this.bobber.scale.setScalar(fishing.phase==='bite'?1.45:1);
     this.rod.rotation.z = fishing.phase === 'reeling' ? Math.sin(fishing.reelElapsed * (fishing.struggling ? 30 : 12)) * (fishing.struggling ? .022 : .008) : 0;
     if (this.preview.visible) {
       const target = fish ? placementPreview(makeWorld(state.fixture), state.player) : fishing.preview;

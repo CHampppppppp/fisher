@@ -5,7 +5,7 @@ const allWeapons=['fist','club','spear','hammer'];
 async function state(page: import('@playwright/test').Page) { return page.evaluate(()=>window.__islandTest!.getState()); }
 async function ticks(page: import('@playwright/test').Page,count:number) { await page.evaluate(count=>window.__islandTest!.advanceTicks(count),count); }
 async function lock(page: import('@playwright/test').Page) {
-  await page.keyboard.press('Escape'); await page.getByRole('button',{name:'继续探索',exact:true}).click();
+  await page.keyboard.press('Escape'); await page.getByRole('button',{name:'继续游戏',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>Boolean(document.pointerLockElement))).toBe(true);
 }
 async function clickAttack(page: import('@playwright/test').Page) { await page.mouse.down(); await page.mouse.up(); }
@@ -34,9 +34,9 @@ test('shop UI sells bass then buys once; insufficient funds feedback and backpac
   await page.locator('.buy-weapon[data-weapon-id=spear]').click();await expect(page.locator('#shop-status')).toContainText('金币不足');expect((await state(page)).coins).toBe(10);
   for(const selector of ['#close-shop','#sell-button','.buy-weapon[data-weapon-id=hammer]']) await expect(page.locator(selector)).toBeInViewport();
   await page.screenshot({path:test.info().outputPath('weapon-shop-1280.png')});
-  await page.locator('#close-shop').click();await page.locator('#inventory-button').click();await page.locator('#inventory-weapons [data-weapon-id=club]').click();
+  await page.locator('#close-shop').click();await page.locator('#pause-inventory').click();await page.locator('#inventory-weapons [data-weapon-id=club]').click();
   s=await state(page);expect(s.currentWeapon).toBe('club');await expect(page.locator('#inventory-weapons [data-weapon-id=club]')).toHaveAttribute('aria-pressed','true');
-  await expect(page.locator('#inventory-weapons [data-weapon-id=hammer]')).toBeDisabled();await page.locator('#close-inventory').click();await page.locator('#mode-button').click();
+  await expect(page.locator('#inventory-weapons [data-weapon-id=hammer]')).toBeDisabled();await page.locator('#close-inventory').click();await lock(page);await page.keyboard.press('KeyQ');
   await expect(page.locator('#fishing-status')).toContainText('木棍');await expect(page.locator('#fishing-help')).toContainText('伤害 25');
   expect(errors).toEqual([]);
 });
@@ -67,7 +67,7 @@ test('hammer cannot bypass cooldown by switching or menu; spear-only reach is re
   await lock(page);await page.keyboard.press('KeyQ');await page.keyboard.press('Digit4');await clickAttack(page);await page.keyboard.press('Digit1');
   await clickAttack(page);expect((await state(page)).lastAction.reason).toBe('attack-cooldown');await page.keyboard.press('Tab');
   const frozen=await state(page);await ticks(page,300);expect(await state(page)).toEqual(frozen);await page.locator('#inventory-weapons [data-weapon-id=spear]').click();
-  expect((await state(page)).attackCooldownRemaining).toBe(1.1);await page.locator('#close-inventory').click();await page.locator('#world').click({position:{x:640,y:360}});
+  expect((await state(page)).attackCooldownRemaining).toBe(1.1);await page.locator('#close-inventory').click();await lock(page);
   await ticks(page,65);await clickAttack(page);expect((await state(page)).lastAction.reason).toBe('attack-cooldown');await ticks(page,1);await clickAttack(page);expect((await state(page)).attack.weaponId).toBe('spear');
   for(const [key,hit] of [['Digit2',false],['Digit3',true]] as const) {
     await page.evaluate(allWeapons=>window.__islandTest!.reset({seed:1,fixture:'shore',initial:{unlockedWeapons:allWeapons,fish:[{id:'range',species:'golden',state:'groundedAlive',position:{x:0,y:1,z:2.8},jumpTimer:0}]}}),allWeapons);
@@ -92,8 +92,8 @@ test('normal UI loop catches, places, kills, picks up, sells, purchases, equips 
   expect((await state(page)).fish[0].state).toBe('groundedDead');await page.keyboard.press('KeyE');expect((await state(page)).inventory[0].id).toBe(first.id);
   await look(page,0,0);await walk(page,'KeyA',90);await walk(page,'KeyW',45);await page.keyboard.press('KeyE');await expect(page.locator('#shop-menu')).toBeVisible();
   await page.locator('.shop-item').click();await page.locator('#sell-button').click();expect((await state(page)).coins).toBe(45);
-  await page.locator('.buy-weapon[data-weapon-id=club]').click();expect((await state(page)).coins).toBe(15);await page.locator('#close-shop').click();await page.keyboard.press('Digit2');
-  expect((await state(page)).currentWeapon).toBe('club');await page.locator('#world').click({position:{x:640,y:360}});await expect.poll(()=>page.evaluate(()=>Boolean(document.pointerLockElement))).toBe(true);
+  await page.locator('.buy-weapon[data-weapon-id=club]').click();expect((await state(page)).coins).toBe(15);await page.locator('#close-shop').click();await lock(page);await page.keyboard.press('Digit2');
+  expect((await state(page)).currentWeapon).toBe('club');await expect.poll(()=>page.evaluate(()=>Boolean(document.pointerLockElement))).toBe(true);
   await look(page,0,0);await walk(page,'KeyS',45);await walk(page,'KeyD',90);await look(page,Math.PI,0);await page.keyboard.press('KeyQ');
   const second=await catchFish(page);expect(second.species).toBe('sprat');await look(page,0,-.4);await page.keyboard.press('KeyE');await page.keyboard.press('KeyQ');await clickAttack(page);
   const final=await state(page);expect(final.fish.find(f=>f.id===second.id)!.state).toBe('groundedDead');expect(final.currentWeapon).toBe('club');expect(final.coins).toBe(15);

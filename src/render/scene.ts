@@ -5,6 +5,7 @@ import { SHOP } from '../game/world.ts';
 import type { World } from '../game/world.ts';
 import { FishingView } from './fishing-view.ts';
 import { LiveFishView } from './live-fish-view.ts';
+import {ImpactView} from './impact-view.ts';
 import { FistView } from './fist-view.ts';
 import { BossView } from './boss-view.ts';
 import { SHOP_COUNTER } from '../game/shop.ts';
@@ -26,6 +27,7 @@ export class IslandView {
   private fishing: FishingView;
   private liveFish: LiveFishView;
   private fists: FistView;
+  private impacts:ImpactView;
   private boss: BossView;
 
   constructor(canvas: HTMLCanvasElement, world: World) {
@@ -78,6 +80,7 @@ export class IslandView {
     this.fishing = new FishingView(this.scene, this.camera);
     this.liveFish = new LiveFishView(this.scene);
     this.fists = new FistView(this.camera);
+    this.impacts=new ImpactView(this.scene);
     this.boss = new BossView(this.scene);
     this.resize(); window.addEventListener('resize', this.resizeHandler);
   }
@@ -112,23 +115,25 @@ export class IslandView {
 
   private shop(): void {
     const { x, z, height, bottom } = SHOP;
-    this.box(3, height, 3, palette.wood, x, bottom + height / 2, z);
-    for (let i = 0; i < 10; i++) this.box(3.01, 0.022, 3.01, 0xb69c76, x, 1.22 + i * 0.35, z);
-    for (const dx of [-1.42, 1.42]) for (const dz of [-1.42, 1.42])
-      this.box(0.15, height, 0.15, palette.darkWood, x + dx, 2.9, z + dz);
-    this.box(0.78, 2.3, 0.05, palette.darkWood, x - 0.7, 2.15, z - 1.52);
-    this.box(0.59, 2.1, 0.06, 0x647967, x - 0.7, 2.15, z - 1.55);
-    this.add(new THREE.SphereGeometry(0.035, 8, 6), 0xe3bd75, x - 0.49, 2.1, z - 1.6);
-    this.box(1.13, 1.0, 0.06, palette.darkWood, x + 0.63, 2.57, z - 1.54);
-    this.box(0.96, 0.83, 0.07, 0x416a68, x + 0.63, 2.57, z - 1.58);
-    this.box(0.04, 0.84, 0.08, palette.wood, x + 0.63, 2.57, z - 1.62);
-    this.box(0.97, 0.04, 0.08, palette.wood, x + 0.63, 2.57, z - 1.62);
+    // Solid rear and side walls, a counter below an open front window.
+    this.box(3,height,.15,palette.wood,x,bottom+height/2,z+1.42);
+    for(const dx of [-1.42,1.42])this.box(.15,height,3,palette.wood,x+dx,bottom+height/2,z);
+    this.box(3,1.05,.32,palette.darkWood,x,1.525,z-1.42);
+    this.box(3.2,.12,.65,palette.wood,x,2.08,z-1.55);
+    for(const dx of [-1.42,1.42])this.box(.15,height,.15,palette.darkWood,x+dx,bottom+height/2,z-1.42);
+    // Merchant stands behind the real interaction counter, facing the player.
+    this.box(.6,.85,.4,0x365e54,x,2.25,z-.6);
+    this.add(new THREE.SphereGeometry(.25,12,8),0xc99570,x,2.96,z-.6);
+    this.box(.62,.09,.5,0xa0804b,x,3.17,z-.6);
+    for(const dx of [-.09,.09])this.add(new THREE.SphereGeometry(.027,6,4),0x252a25,x+dx,2.99,z-.82);
+    for(const dx of [-.38,.38]){this.box(.16,.6,.18,0x365e54,x+dx,2.25,z-.7);this.box(.16,.14,.25,0xc99570,x+dx,2.12,z-1);}
+    for(const dx of [-.18,.18])this.box(.2,.65,.25,0x413e35,x+dx,1.45,z-.6);
     for (const dx of [-0.95, 0.95]) {
       const roof = this.box(2.05, 0.14, 3.7, palette.roof, x + dx * 0.8, 4.96, z);
       roof.rotation.z = -Math.sign(dx) * 0.37;
     }
     this.label('海风补给', 'E · 出售 / 购买武器', SHOP_COUNTER.x, 3.82, SHOP_COUNTER.z, 2.65);
-    this.box(3.2, 0.12, 0.7, 0x608677, x, 3.35, z - 1.73).rotation.x = -0.13;
+
     // Decoration stays beside the building and has no interaction in this stage.
     this.add(new THREE.CylinderGeometry(0.3, 0.3, 0.7, 10), palette.darkWood, x - 1.9, 1.35, z - 0.5);
   }
@@ -162,14 +167,16 @@ export class IslandView {
   rebuild(world: World): void {
     this.clearIsland();
     this.liveFish?.reset();
+    this.impacts?.reset();
     this.boss?.reset();
     const square = world.coast.kind === 'square';
     const coast = square ? 10 : 23;
     this.water.uniforms.square.value = square ? 1 : 0;
     this.water.uniforms.coast.value = coast;
-    if (square) this.box(20, 1.5, 20, palette.sand, 0, 0.25, 0);
+    this.box(132,.2,132,0x859b87,0,-8.1,0);
+    if (square) this.box(20, 9, 20, palette.sand, 0, -3.5, 0);
     else {
-      this.add(new THREE.CylinderGeometry(23, 24, 1.5, 96), palette.sand, 0, 0.25, 0);
+      this.add(new THREE.CylinderGeometry(23, 23, 9, 96), palette.sand, 0, -3.5, 0);
       const grass = this.add(new THREE.CircleGeometry(9, 40), palette.grass, -5, 1.008, -7);
       grass.rotation.x = -Math.PI / 2; grass.scale.set(1.4, 0.9, 1);
       for (const [x, z, h, angle] of [[-13, -11, 6, .3], [-10, -16, 5.4, 1.2], [13, -10, 6.8, .4], [16, 7, 5.6, 2.1], [-17, 8, 5.8, .8]])
@@ -180,9 +187,6 @@ export class IslandView {
           Math.cos(angle) * radius, 1.04, Math.sin(angle) * radius);
         rock.scale.y = 0.65;
       }
-      // A clearly marked sandy shore; no pier extending over walkable water.
-      for (const x of [3.5, 5.5]) this.box(0.09, 1.4, 0.09, palette.darkWood, x, 1.7, 19.2);
-      this.label('钓鱼岸边', 'FISHING SHORE', 4.5, 2.17, 19.25, 2.3);
       const buoy = this.add(new THREE.SphereGeometry(0.22, 10, 8), 0xd88759, 6, 0.12, 28);
       buoy.scale.y = 1.4;
     }
@@ -199,6 +203,7 @@ export class IslandView {
     this.fishing.update(state);
     this.liveFish.update(state);
     this.fists.update(state);
+    this.impacts.update(state);
     this.boss.update(state);
     this.water.uniforms.time.value = state.simulationTick * STEP;
     this.renderer.render(this.scene, this.camera);
@@ -213,7 +218,7 @@ export class IslandView {
     window.removeEventListener('resize', this.resizeHandler);
     this.fishing.dispose();
     this.liveFish.dispose();
-    this.fists.dispose();
+    this.fists.dispose();this.impacts.dispose();
     this.boss.dispose();
     this.clearIsland();
     this.scene.traverse(object => {

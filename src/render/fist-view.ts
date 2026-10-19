@@ -46,19 +46,23 @@ export class FistView {
   }
 
   update(state: GameState): void {
-    this.root.visible=state.mode==='combat';
     const active = state.attack.result !== 'none' && state.attack.elapsed < WEAPONS[state.attack.weaponId].animationSeconds - 1e-9;
+    this.root.visible=((state.selectedSlot>0&&state.selectedSlot<5)||active)&&!state.fish.some(f=>f.state==='carried')&&state.gamePhase==='running';
     const id = active ? state.attack.weaponId : state.currentWeapon;
     for (const fist of this.fists) fist.visible = id === 'fist';
     for (const [key,tool] of Object.entries(this.tools)) tool.visible = id === key;
-    const swing=state.attack.elapsed<.22 ? Math.sin(state.attack.elapsed/.22*Math.PI) : 0;
-    this.fists[0].position.set(-.30+swing*.19,-.35+swing*.14,-.60-swing*.48);
-    this.fists[0].rotation.z=-swing*.28;
-    this.fists[1].rotation.z=.1;
+    const phase=state.attack.elapsed/WEAPONS.fist.animationSeconds;
+    const swing=active&&id==='fist'?(phase<1/3?Math.sin(phase*3*Math.PI/2):Math.cos((phase-1/3)*1.5*Math.PI/2)):0;
+    for(const [index,fist] of this.fists.entries()) {
+      const left=index===0,amount=(state.attack.hand===(left?'left':'right'))?swing:0;
+      fist.position.set((left?-.30:.34)+(left?1:-1)*amount*.19,-.35+amount*.14,-.60-amount*.48);
+      fist.rotation.z=(left?-1:1)*amount*.28;
+    }
     if (id !== 'fist') {
       const tool = this.tools[id];
       const t = active ? state.attack.elapsed / WEAPONS[id].animationSeconds : 1;
-      const strike = Math.sin(Math.min(1,t)*Math.PI);
+      const hit=WEAPONS[id].hitTick/WEAPONS[id].cooldownTicks;
+      const strike=t<hit?Math.sin(t/hit*Math.PI/2):Math.cos((t-hit)/(1-hit)*Math.PI/2);
       if (id === 'club') {
         tool.position.set(.36-strike*.30,-.43+strike*.1,-.82-strike*.25);
         tool.rotation.set(-.25-strike*.8,0,-.32+strike*1.5);

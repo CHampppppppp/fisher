@@ -15,10 +15,13 @@ export class BossView {
   private root=new THREE.Group();
   private body=new THREE.Group();
   private skin=new THREE.MeshStandardMaterial({color:0x775d91,roughness:.58});
+  private jumpMarker=new THREE.Group();
   private models=new Map<string,THREE.Group>();
 
   constructor(scene: THREE.Scene) {
     this.root.name='boss-and-attacks';scene.add(this.root);this.root.add(this.body);this.body.scale.z=-1;
+    this.root.add(this.jumpMarker);this.jumpMarker.name='boss-jump-warning';
+    const landing=new THREE.Mesh(new THREE.TorusGeometry(2,.08,8,48),new THREE.MeshBasicMaterial({color:0xffab4c,transparent:true,opacity:.8}));landing.rotation.x=-Math.PI/2;this.jumpMarker.add(landing);
     const head=new THREE.Mesh(new THREE.SphereGeometry(BOSS.radius,32,20),this.skin);head.castShadow=true;head.name='boss-body-collider';this.body.add(head);
     for(const x of [-.57,.57]) {
       const eye=new THREE.Mesh(new THREE.SphereGeometry(.25,12,8),new THREE.MeshStandardMaterial({color:0xf1e0b7}));eye.position.set(x,.66,-1.81);this.body.add(eye);
@@ -60,7 +63,10 @@ export class BossView {
 
   update(state: GameState): void {
     const boss=state.boss;this.body.visible=boss.state!=='locked';this.body.position.set(boss.position.x,boss.position.y,-boss.position.z);
-    const defeated=boss.state==='defeated';this.body.scale.set(defeated ? .55 : 1,defeated ? .3 : 1,defeated ? -.55 : -1);
+    this.jumpMarker.visible=boss.state==='active'&&boss.jumpPhase==='warning';this.jumpMarker.position.set(boss.target.x,boss.target.y===3?1.03:.07,-boss.target.z);
+    const defeated=boss.state==='defeated';this.body.rotation.y=Math.atan2(state.player.position.x-boss.position.x,-state.player.position.z+boss.position.z);
+    this.body.rotation.z=boss.jumpPhase==='jumping'?Math.sin((45-boss.jumpTicks)/45*Math.PI*4)*.18:boss.jumpPhase==='warning'?Math.sin(state.simulationTick)*.06:0;
+    this.body.scale.set(defeated ? .55 : 1,defeated ? .3 : 1,defeated ? -.55 : -1);
     this.skin.color.setHex(defeated?0x596569:boss.phase===2?0x964b76:0x775d91);
     const damage=state.events.findLast(event=>event.type==='boss_damage');
     this.skin.emissive.setHex(damage && state.simulationTick-damage.tick<9?0x874927:0);this.skin.emissiveIntensity=.8;
@@ -83,6 +89,6 @@ export class BossView {
     }
   }
 
-  reset(): void { for(const model of this.models.values()) release(model);this.models.clear();this.body.visible=false; }
+  reset(): void { for(const model of this.models.values()) release(model);this.models.clear();this.body.visible=false;this.jumpMarker.visible=false; }
   dispose(): void { this.reset();release(this.root); }
 }

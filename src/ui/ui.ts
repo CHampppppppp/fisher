@@ -2,7 +2,6 @@ import type { GameState } from '../game/types.ts';
 import { FISH_SPECIES } from '../game/fish-species.ts';
 import { placementPreview } from '../game/fish-life.ts';
 import { makeWorld } from '../game/world.ts';
-import { FOOD, INVENTORY_CAPACITY } from '../game/survival.ts';
 import { SALE_PRICES, shopAccess } from '../game/shop.ts';
 import { WEAPONS, WEAPON_IDS } from '../game/weapons.ts';
 import { BINDING_ACTIONS, BINDING_LABELS, keyLabel } from '../game/settings.ts';
@@ -19,21 +18,14 @@ export class UI {
   private settingsOverlay: HTMLElement;
   readonly canvas: HTMLCanvasElement;
   readonly button: HTMLButtonElement;
-  readonly modeButton: HTMLButtonElement;
   readonly cancelButton: HTMLButtonElement;
   readonly restartButton: HTMLButtonElement;
   readonly placeButton: HTMLButtonElement;
-  readonly inventoryButton: HTMLButtonElement;
-  readonly closeInventoryButton: HTMLButtonElement;
-  readonly eatButton: HTMLButtonElement;
-  readonly pauseInventoryButton: HTMLButtonElement;
   readonly shopButton: HTMLButtonElement;
   readonly closeShopButton: HTMLButtonElement;
   readonly sellButton: HTMLButtonElement;
   readonly weaponBar: HTMLElement;
-  readonly inventoryWeapons: HTMLElement;
   readonly purchaseList: HTMLElement;
-  selectedFishId: string | null = null;
   selectedShopFishId: string | null = null;
   private overlay: HTMLElement;
   private hp: HTMLElement;
@@ -61,15 +53,8 @@ export class UI {
   private liveFishStatus: HTMLElement;
   private fishNotice: HTMLElement;
   private attackFeedback: HTMLElement;
-  private inventoryOverlay: HTMLElement;
-  private inventoryList: HTMLElement;
-  private inventoryCount: HTMLElement;
-  private inventoryVitals: HTMLElement;
-  private inventoryStatus: HTMLElement;
-  private foodDetail: HTMLElement;
   private survivalWarning: HTMLElement;
   private interactionFeedback: HTMLElement;
-  private inventorySignature = '';
   private shopOverlay: HTMLElement;
   private shopList: HTMLElement;
   private shopBalance: HTMLElement;
@@ -81,16 +66,16 @@ export class UI {
   private currentState: GameState | null = null;
   private bossPlaytest = false;
   private bindingSignature = '';
-  private hintTemplates: [HTMLElement,string][] = [];
 
   constructor(root: HTMLElement) {
     root.innerHTML = `
       <p id="playtest-banner" hidden>Boss专项试玩 · 预置装备，不代表完整流程通关</p>
       <canvas id="world" aria-label="第一人称海岛游戏场景"></canvas>
-      <header class="identity"><span class="brand">潮生<span class="brand-dot">.</span></span><span class="edition">ISLAND / 12</span></header>
+      <header class="identity"><span class="brand">潮生<span class="brand-dot">.</span></span></header>
       <p id="rare-progress" role="status">金鳞捕获 0 / 3</p>
       <section id="boss-hud" aria-label="章鱼Boss状态" hidden><div class="boss-heading"><strong>北岸章鱼</strong><span id="boss-phase">第一阶段</span><strong id="boss-hp">600 / 600</strong></div><div class="boss-bar"><span id="boss-hp-fill"></span></div><p id="boss-attack-status" role="status"></p></section>
       <div id="damage-flash" aria-hidden="true" hidden></div>
+      <div id="underwater-tint" hidden aria-hidden="true"></div><p id="oxygen" hidden>氧气 <span id="oxygen-value">20</span></p>
       <div id="hud" aria-label="玩家状态">
         <div class="compass"><span>W</span><span class="compass-mark">│</span><strong id="bearing">N</strong><span class="compass-mark">│</span><span>E</span></div>
         <div class="coins"><span>金币</span><strong id="coins-value">0</strong><span class="coin-symbol" aria-hidden="true">◎</span></div>
@@ -107,6 +92,7 @@ export class UI {
         <p id="attack-feedback" hidden></p>
         <div id="charge-track"><div id="charge-fill"></div></div>
         <span id="bite-window" hidden></span>
+        <p id="pull-feedback" hidden></p>
         <div id="reel-meters" hidden>
           <div class="reel-meter"><span>张力</span><strong id="tension-value">40.0</strong><span class="meter-track"><span id="tension-fill"></span></span></div>
           <div class="reel-meter"><span>收杆进度</span><strong id="progress-value">0.0</strong><span class="meter-track"><span id="progress-fill"></span></span></div>
@@ -114,80 +100,61 @@ export class UI {
         <p id="fishing-help">按住左键蓄力，松开抛竿</p>
       </div>
       <div id="fishing-actions">
-        <button id="mode-button" type="button">钓鱼模式 <kbd>Q</kbd></button>
         <button id="cancel-fishing" type="button" hidden>取消钓鱼 <kbd>R</kbd></button>
         <button id="place-fish" type="button" hidden>放下活鱼 <kbd>E</kbd></button>
         <button id="restart-button" type="button" hidden>重新开始</button>
-        <button id="inventory-button" type="button">背包 <kbd>Tab</kbd></button>
         <button id="shop-button" type="button" hidden>海风商店 <kbd>E</kbd></button>
       </div>
       <p id="pointer-hint" hidden>鼠标已释放 · 点击场景继续观察</p>
       <p id="live-fish-status" hidden aria-live="polite"></p>
       <p id="fish-notice" hidden role="status"></p>
       <p id="interaction-feedback" hidden role="status"></p>
-      <p id="survival-warning" hidden role="status">饥饿过低 · 生命每秒减少 2 · Tab 打开背包食用</p>
+      <p id="survival-warning" hidden role="status">饥饿过低 · 生命每秒减少 2 · 选择鱼格，左键食用</p>
       <p id="shop-hint" hidden role="status">柜台就在眼前 · 按 E 出售 / 购买武器</p>
-      <nav id="weapon-bar" aria-label="武器快捷栏">${this.weaponButtons()}</nav>
+      <nav id="weapon-bar" aria-label="物品快捷栏">${this.weaponButtons()}</nav>
       <p id="weapon-feedback" role="status" aria-live="polite"></p>
-      <div class="location"><span class="location-dot"></span>无名岛 <span class="location-divider">/</span> 第一天</div>
-      <div id="controls"><span><kbd>W A S D</kbd> 移动</span><span><kbd>SPACE</kbd> 跳跃</span><span><kbd>SHIFT</kbd> 冲刺</span><span><kbd>E</kbd> 交互</span><span><kbd>TAB</kbd> 背包</span><span><kbd>ESC</kbd> 暂停</span></div>
       <section id="menu" aria-labelledby="menu-title">
         <div class="menu-content">
-          <p class="eyebrow">A LITTLE ISLAND. A NEW BEGINNING.</p>
-          <h1 id="menu-title">潮起，<br>从这里出发。</h1>
-          <p id="menu-description">脚下是沙，眼前是海。<br>沿着岸边走走，找到海风补给站。</p>
+          <h1 id="menu-title">潮生</h1>
+          <p id="menu-description">钓鱼、补充食物，准备迎战章鱼。</p>
           <dl id="victory-stats" hidden></dl>
-          <button id="play-button" type="button">开始探索 <span aria-hidden="true">↗</span></button>
-          <button id="pause-inventory" type="button" hidden>打开背包</button>
-          <button id="settings-button" type="button">设置与键位</button><button id="pause-restart" type="button" hidden>重新开始新局</button>
+          <div class="menu-actions"><button id="play-button" type="button">开始游戏</button>
+          <button id="settings-button" type="button">设置</button><button id="pause-restart" type="button" hidden>重新开始</button>
           ${this.storageTools()}
+          <details id="menu-help"><summary>操作帮助</summary><div class="help-content"><div id="controls"><span><kbd>W A S D</kbd> 移动</span><span><kbd>SPACE</kbd> 跳跃</span><span><kbd>SHIFT</kbd> 冲刺</span><span><kbd>E</kbd> 交互</span><span><kbd>TAB</kbd> 背包</span><span><kbd>ESC</kbd> 暂停</span></div><p>钓鱼：按住左键蓄力，松开抛竿；咬钩后按住左键收杆，松开缓解张力。</p><p>切换模式 Q · 取消钓鱼 R · 战斗时左键攻击 · 1–4 切换武器。</p></div></details></div>
           <p id="playtest-entry"><a href="?playtest=boss">Boss 专项试玩</a></p>
-          <p class="lock-help">点击后锁定鼠标 · 移动鼠标观察 · Esc 释放鼠标</p>
+          <p class="lock-help">点击开始后使用鼠标观察，Esc 暂停</p>
           <p id="menu-message" role="status" aria-live="polite"></p>
         </div>
-        <span class="chapter">第一章 <span>海岛初见</span></span>
+
       </section>
       <section id="settings-menu" role="dialog" aria-modal="true" aria-labelledby="settings-title" hidden>
         <div class="settings-panel">
-          <div class="inventory-heading"><h2 id="settings-title">设置与键位</h2><span>本地自动保留</span></div>
-          <p class="inventory-help">时间已冻结 · 关闭后仍暂停 · 与游戏存档独立</p>
+          <div class="inventory-heading"><h2 id="settings-title">设置</h2><span>自动保存</span></div>
+          <p class="inventory-help">Esc 返回菜单</p>
           <label class="setting-range" for="volume-input"><span>音量 <output id="volume-output" for="volume-input">100%</output></span><input id="volume-input" type="range" min="0" max="100" step="any" value="100"><small>0% 完全静音</small></label>
           <label class="setting-range" for="sensitivity-input"><span>鼠标灵敏度 <output id="sensitivity-output" for="sensitivity-input">1.00 倍</output></span><input id="sensitivity-input" type="range" min="0.25" max="3" step="any" value="1"><small>0.25–3 倍 · 数值越大转向越快</small></label>
           <h3>动作键位</h3><p class="settings-help">选择按键按钮后按新键；Esc 取消绑定并保留暂停。重复按键拒绝，Tab 可导航控件。</p>
           <div id="settings-bindings">${BINDING_ACTIONS.map(action=>`<div class="binding-row"><span>${BINDING_LABELS[action]}</span><button type="button" data-binding-action="${action}"></button></div>`).join('')}</div>
           <p id="settings-status" role="status" aria-live="polite">修改后自动保留，关闭设置后点击继续。</p>
-          <button id="close-settings" type="button">关闭设置</button>
+          <button id="close-settings" type="button">返回菜单</button>
         </div>
       </section>
       <section id="shop-menu" role="dialog" aria-modal="true" aria-labelledby="shop-title" hidden>
         <div class="inventory-panel shop-panel">
           <div class="inventory-heading"><h2 id="shop-title">海风补给</h2><span id="shop-balance">金币 0</span></div>
-          <p class="inventory-help">时间已冻结 · 尸体只能出售一次 · 购买武器本局永久解锁</p>
+          <p class="inventory-help">游戏已暂停</p>
           <p id="shop-vitals"></p>
           <div class="shop-columns"><section aria-labelledby="sale-title"><h3 id="sale-title">出售鱼尸体</h3>
           <div id="shop-list" aria-label="可出售尸体"></div>
           <p id="shop-detail">选择一条鱼查看售价。</p>
           </section><section aria-labelledby="purchase-title"><h3 id="purchase-title">购买武器</h3><div id="purchase-list">
-          ${WEAPON_IDS.filter(id => id !== 'fist').map(id => `<div class="weapon-offer"><strong>${WEAPONS[id].name} <span>${WEAPONS[id].price} 金币</span></strong><p>伤害 ${WEAPONS[id].damage} · 射程 ${WEAPONS[id].range} m<br>冷却 ${WEAPONS[id].cooldownTicks / 60} s · 击退 ${WEAPONS[id].knockback} m</p><button class="buy-weapon" data-weapon-id="${id}" type="button">购买${WEAPONS[id].name}</button></div>`).join('')}
-          </div><p class="inventory-help">购买后按 1–4 或在背包装备<br>切换装备不会清除攻击冷却</p></section></div>
+          ${WEAPON_IDS.filter(id => id !== 'fist').map(id => `<div class="weapon-offer"><strong>${WEAPONS[id].name} <span>${WEAPONS[id].price} 金币</span></strong><p>伤害 ${WEAPONS[id].damage} · 射程 ${WEAPONS[id].range} m<br>动作 ${WEAPONS[id].cooldownTicks / 60} s · 击退 ${WEAPONS[id].knockback} m</p><button class="buy-weapon" data-weapon-id="${id}" type="button">购买${WEAPONS[id].name}</button></div>`).join('')}
+          </div><p class="inventory-help">购买后通过快捷栏装备<br>切换工具不会提前结束动作</p></section></div>
           <p id="shop-status" role="status" aria-live="polite"></p>
-          <div class="inventory-actions"><button id="sell-button" type="button" disabled>出售所选鱼</button><button id="close-shop" type="button">关闭商店并继续</button></div>
+          <div class="inventory-actions"><button id="sell-button" type="button" disabled>出售所选鱼</button><button id="close-shop" type="button">返回菜单</button></div>
           ${this.storageTools()}
-          <p class="inventory-help">Tab 也可关闭 · 清除按住输入 · 期间失焦后仍需点击继续探索</p>
-        </div>
-      </section>
-      <section id="inventory-menu" role="dialog" aria-modal="true" aria-labelledby="inventory-title" hidden>
-        <div class="inventory-panel">
-          <div class="inventory-heading"><h2 id="inventory-title">尸体背包</h2><span id="inventory-count">0 / 10</span></div>
-          <p class="inventory-help">时间已冻结 · 每条鱼占一格 · 食用只恢复饥饿</p>
-          <p id="inventory-vitals"></p>
-          <h3>装备武器</h3><div id="inventory-weapons" aria-label="背包装备">${this.weaponButtons()}</div>
-          <div id="inventory-list" aria-label="背包物品"></div>
-          <p id="food-detail">选择一条鱼查看恢复值。</p>
-          <p id="inventory-status" role="status" aria-live="polite"></p>
-          <div class="inventory-actions"><button id="eat-button" type="button" disabled>食用所选鱼</button><button id="close-inventory" type="button">关闭背包</button></div>
-          ${this.storageTools()}
-          <p class="inventory-help">关闭后清除按住输入 · 若已暂停或失焦，请点击继续探索</p>
+          <p class="inventory-help">Esc 返回菜单，点击继续游戏后恢复</p>
         </div>
       </section>
       <div id="fatal" role="alert" hidden></div>`;
@@ -206,7 +173,6 @@ export class UI {
     this.coins = root.querySelector<HTMLElement>('#coins-value')!;
     this.bearing = root.querySelector<HTMLElement>('#bearing')!;
     this.message = root.querySelector<HTMLElement>('#menu-message')!;
-    this.modeButton = root.querySelector<HTMLButtonElement>('#mode-button')!;
     this.cancelButton = root.querySelector<HTMLButtonElement>('#cancel-fishing')!;
     this.fishingInfo = root.querySelector<HTMLElement>('#fishing-info')!;
     this.fishingActions = root.querySelector<HTMLElement>('#fishing-actions')!;
@@ -229,16 +195,6 @@ export class UI {
     this.liveFishStatus = root.querySelector<HTMLElement>('#live-fish-status')!;
     this.fishNotice = root.querySelector<HTMLElement>('#fish-notice')!;
     this.attackFeedback = root.querySelector<HTMLElement>('#attack-feedback')!;
-    this.inventoryButton = root.querySelector<HTMLButtonElement>('#inventory-button')!;
-    this.closeInventoryButton = root.querySelector<HTMLButtonElement>('#close-inventory')!;
-    this.eatButton = root.querySelector<HTMLButtonElement>('#eat-button')!;
-    this.pauseInventoryButton = root.querySelector<HTMLButtonElement>('#pause-inventory')!;
-    this.inventoryOverlay = root.querySelector<HTMLElement>('#inventory-menu')!;
-    this.inventoryList = root.querySelector<HTMLElement>('#inventory-list')!;
-    this.inventoryCount = root.querySelector<HTMLElement>('#inventory-count')!;
-    this.inventoryVitals = root.querySelector<HTMLElement>('#inventory-vitals')!;
-    this.inventoryStatus = root.querySelector<HTMLElement>('#inventory-status')!;
-    this.foodDetail = root.querySelector<HTMLElement>('#food-detail')!;
     this.survivalWarning = root.querySelector<HTMLElement>('#survival-warning')!;
     this.interactionFeedback = root.querySelector<HTMLElement>('#interaction-feedback')!;
     this.shopButton = root.querySelector<HTMLButtonElement>('#shop-button')!;
@@ -252,17 +208,15 @@ export class UI {
     this.shopStatus = root.querySelector<HTMLElement>('#shop-status')!;
     this.shopHint = root.querySelector<HTMLElement>('#shop-hint')!;
     this.weaponBar = root.querySelector<HTMLElement>('#weapon-bar')!;
-    this.inventoryWeapons = root.querySelector<HTMLElement>('#inventory-weapons')!;
     this.purchaseList = root.querySelector<HTMLElement>('#purchase-list')!;
-    this.hintTemplates = Array.from(root.querySelectorAll<HTMLElement>('.inventory-help')).map(element=>[element,element.innerHTML]);
   }
 
   private weaponButtons(): string {
-    return WEAPON_IDS.map((id, index) => `<button type="button" class="equip-weapon" data-weapon-id="${id}" aria-pressed="false"><kbd>${index + 1}</kbd> ${WEAPONS[id].name}</button>`).join('');
+    return ['鱼竿','拳头','木棍','鱼叉','重锤','银鳍鱼','岩鲈鱼','蓝背鱼','金鳞鱼'].map((name,index)=>`<button type="button" data-slot="${index}" aria-pressed="false"><kbd>${index+1}</kbd><span class="slot-name">${name}</span><small class="slot-count"></small></button>`).join('');
   }
 
   private storageTools(): string {
-    return `<section class="storage-tools" aria-label="本地存档"><div><button type="button" data-storage-action="save">保存进度</button><button type="button" data-storage-action="load">读取存档</button></div><p class="storage-status" role="status" aria-live="polite">单槽本地存档 · 读取后暂停 · Esc 打开保存菜单</p></section>`;
+    return `<section class="storage-tools" aria-label="本地存档"><div><button type="button" data-storage-action="save">保存游戏</button><button type="button" data-storage-action="load">读取存档</button></div><p class="storage-status" role="status" aria-live="polite"></p></section>`;
   }
   setStorageStatus(message: string, busy: boolean): void {
     document.querySelectorAll<HTMLElement>('.storage-status').forEach(element => { element.textContent = message; });
@@ -291,9 +245,9 @@ export class UI {
     const signature = JSON.stringify(state.settings.bindings);
     if (signature !== this.bindingSignature) {
       this.bindingSignature = signature;
-      this.inventorySignature = ''; this.shopSignature = '';
-      document.querySelector('#controls')!.innerHTML = `<span><kbd>${(['forward','left','backward','right'] as const).map(action=>this.key(action)).join(' ')}</kbd> 移动</span><span><kbd>${this.key('jump')}</kbd> 跳跃</span><span><kbd>${this.key('sprint')}</kbd> 冲刺</span><span><kbd>${this.key('interact')}</kbd> 交互</span><span><kbd>${this.key('inventory')}</kbd> 背包</span><span><kbd>ESC</kbd> 暂停</span>`;
-      for (const [element,original] of this.hintTemplates) element.innerHTML = original.replace(/\bTab\b/g,this.key('inventory')).replace(/\bE\b/g,this.key('interact')).replace('1–4',(['weapon1','weapon2','weapon3','weapon4'] as const).map(action=>this.key(action)).join('/'));
+      this.shopSignature = '';
+      document.querySelector('#menu-help .help-content p:last-child')!.textContent = `数字1–9或滚轮选择物品，左键使用；${this.key('cancelFishing')} 收回鱼竿。水中 ${this.key('jump')} 上浮 / ${this.key('dive')} 下潜。`;
+      document.querySelector('#controls')!.innerHTML = `<span><kbd>${(['forward','left','backward','right'] as const).map(action=>this.key(action)).join(' ')}</kbd> 移动</span><span><kbd>${this.key('jump')}</kbd> 跳跃 / 上浮</span><span><kbd>${this.key('sprint')}</kbd> 冲刺</span><span><kbd>${this.key('interact')}</kbd> 交互</span><span><kbd>ESC</kbd> 暂停</span>`;
     }
   }
 
@@ -311,10 +265,13 @@ export class UI {
   markStarted(): void {
     if (this.started) return;
     this.started = true;
-    document.querySelector('#menu-title')!.textContent = '在这里，歇一会。';
-    document.querySelector('#menu-description')!.innerHTML = '海风还在，时间已停。<br>准备好后，继续探索这座岛。';
-    this.button.innerHTML = '继续探索 <span aria-hidden="true">↗</span>';
     this.overlay.classList.add('pause-menu');
+  }
+
+  closeHelp(): boolean {
+    const help = document.querySelector<HTMLDetailsElement>('#menu-help')!;
+    if (!help.open) return false;
+    help.open = false; help.querySelector<HTMLElement>('summary')!.focus(); return true;
   }
 
   setMessage(message: string): void { this.message.textContent = message; }
@@ -330,38 +287,36 @@ export class UI {
     const dead = state.gamePhase === 'dead';
     const victory = state.gamePhase === 'victory';
     this.overlay.hidden = state.ui.menu !== 'pause' && !dead && !victory;
-    this.inventoryOverlay.hidden = state.ui.menu !== 'inventory';
     this.shopOverlay.hidden = state.ui.menu !== 'shop';
     const access = shopAccess(state.player);
     this.shopButton.hidden = !access.valid; this.shopHint.hidden = !access.valid || paused;
     this.pauseRestartButton.hidden = !this.started || dead || victory;
-    this.pauseInventoryButton.hidden = !this.started || state.ui.menu !== 'pause';
-    this.inventoryButton.innerHTML = `背包 ${state.inventory.length} / 10 <kbd>${this.key('inventory')}</kbd>`;
     if (this.started) {
-      document.querySelector('#menu-title')!.textContent = victory ? '北岸，平静了。' : dead ? '这次，止步于此。' : '在这里，歇一会。';
-      document.querySelector('#menu-description')!.textContent = victory ? '通关成功 · 章鱼已被击败。海岛重新安静下来，这次探索到此完成。' : dead ? state.deathReason==='boss' ? '生命耗尽。章鱼的攻击终结了这次探索。重新开始，留意地面预警与墨汁方向。' : '生命耗尽。饥饿低于 20 时会持续失去生命。重新开始，再次探索海岛。' : '海风还在，时间已停。准备好后，继续探索这座岛。';
-      this.button.textContent = dead || victory ? '重新开始' : '继续探索';
-      document.querySelector('.lock-help')!.textContent = dead || victory ? '确认重新开始后重置本局进度，并锁定鼠标' : '点击后锁定鼠标 · 移动鼠标观察 · Esc 释放鼠标';
+      document.querySelector('#menu-title')!.textContent = victory ? '通关成功' : dead ? '游戏结束' : '游戏已暂停';
+      document.querySelector('#menu-description')!.textContent = victory ? '你击败了章鱼。' : dead ? state.deathReason==='drowning' ? '溺水了。重新开始，留意氧气。' : state.deathReason==='boss' ? '生命耗尽。章鱼的攻击终结了这次探索。重新开始，留意地面预警与墨汁方向。' : '生命耗尽。饥饿低于 20 时会持续失去生命。重新开始，再次探索海岛。' : '选择继续游戏返回海岛。';
+      this.button.textContent = dead || victory ? '重新开始' : '继续游戏';
+      document.querySelector('.lock-help')!.textContent = dead || victory ? '确认重新开始后重置本局进度，并锁定鼠标' : '点击开始后使用鼠标观察，Esc 暂停';
     }
     if (this.bossPlaytest) {
       document.querySelector('#menu-title')!.textContent = victory ? '试玩完成' : dead ? '挑战失败' : 'Boss 专项试玩';
-      document.querySelector('#menu-description')!.textContent = `预置满生命与饥饿，解锁全部武器，默认重锤。${['weapon1','weapon2','weapon3','weapon4'].map(action => this.key(action as BindingAction)).join(' / ')} 切换武器，左键攻击，${['forward','left','backward','right'].map(action => this.key(action as BindingAction)).join(' / ')} 移动躲避预警。此入口不读写存档，不能作为完整流程通关证据。`;
+      document.querySelector('#menu-description')!.textContent = '全武器已解锁，默认装备重锤。此模式不读写普通游戏存档。';
       this.button.textContent = dead || victory ? '再次挑战' : this.started ? '继续挑战' : '开始挑战';
       this.pauseRestartButton.textContent = '重新挑战 Boss';
     }
     document.body.classList.toggle('is-paused', paused);
+    document.body.classList.toggle('has-started', this.started);
+    document.body.classList.toggle('in-menu', state.ui.menu !== 'none' || paused);
+    if (this.overlay.hidden) document.querySelector<HTMLDetailsElement>('#menu-help')!.open = false;
     this.hp.textContent = String(Number(state.player.hp.toFixed(1)));
     this.hunger.textContent = String(Number(state.player.hunger.toFixed(1)));
     document.querySelector<HTMLElement>('.vital .bar>span')!.style.width = `${state.player.hp}%`;
     document.querySelector<HTMLElement>('.hunger .bar>span')!.style.width = `${state.player.hunger}%`;
-    this.survivalWarning.textContent = `饥饿过低 · 生命每秒减少 2 · ${this.key('inventory')} 打开背包食用`;
+    this.survivalWarning.textContent = `饥饿过低 · 生命每秒减少 2 · 选择鱼格，左键食用`;
     this.survivalWarning.hidden = state.player.hunger >= 20 || dead || victory;
     document.body.classList.toggle('low-hunger', state.player.hunger < 20);
-    this.updateInventory(state);
     this.updateShop(state);
-    this.updateWeapons(state);
     this.updateBoss(state);
-    const notices: Record<string,string> = { 'inventory-full':'背包已满（10 / 10）· 尸体仍在岸上', 'pickup-corpse':`已拾取尸体 · ${this.key('inventory')} 打开背包`, 'no-corpse-in-range':'2 米内没有尸体 · 商店需走到正面柜台', 'place-fish':'已放下活鱼', 'shop-too-far':'柜台距离超过 2 米，请走到商店正面', 'shop-obstructed':'柜台被墙挡住，请绕到商店正面' };
+    const notices: Record<string,string> = { 'inventory-full':'物品已满（10 / 10）· 尸体仍在岸上', 'pickup-corpse':`已拾取尸体 · 已放入快捷栏`, 'no-corpse-in-range':'2 米内没有尸体 · 商店需走到正面柜台', 'place-fish':'已放下活鱼', 'shop-too-far':'柜台距离超过 2 米，请走到商店正面', 'shop-obstructed':'柜台被墙挡住，请绕到商店正面' };
     if (notices[state.lastAction.reason]) { this.interactionFeedback.textContent = notices[state.lastAction.reason]; this.interactionFeedback.hidden = false; }
     if (['reset','restart'].includes(state.lastAction.reason)) this.interactionFeedback.hidden = true;
     this.coins.textContent = String(state.coins);
@@ -377,8 +332,6 @@ export class UI {
     this.speciesDetail.hidden = !definition || (!reeling && !carrying);
     this.speciesDetail.textContent = definition ? `${definition.rarity} · 出现概率 ${definition.probability}% · 挣扎 +${definition.struggle}/秒` : '';
     this.fishingInfo.hidden = paused && !reeling && fishing.phase !== 'bite'; this.fishingActions.hidden = paused;
-    this.modeButton.innerHTML = `${mode === 'fishing' ? '钓鱼模式' : '战斗模式'} <kbd>${this.key('toggleMode')}</kbd>`;
-    this.modeButton.setAttribute('aria-label', mode === 'fishing' ? '切换到战斗模式' : '切换到钓鱼模式');
     this.cancelButton.hidden = fishing.phase === 'idle';
     this.cancelButton.innerHTML = `取消钓鱼 <kbd>${this.key('cancelFishing')}</kbd>`;
     this.placeButton.innerHTML = `放下活鱼 <kbd>${this.key('interact')}</kbd>`;
@@ -396,7 +349,7 @@ export class UI {
     const attacking = state.attack.elapsed < WEAPONS[state.attack.weaponId].animationSeconds;
     const focus = (attacking && state.attack.targetKind!=='boss' && living.find(fish => fish.id === state.attack.hitId)) || living[0];
     if (focus) this.liveFishStatus.textContent = `${FISH_SPECIES[focus.species].name} · ${focus.state === 'groundedDead' ? '尸体' : focus.jumpPhase === 'warning' ? '起跳预兆' : focus.jumpPhase === 'jumping' ? '跳跃中' : '正在岸上'} · HP ${focus.hp}/${FISH_SPECIES[focus.species].hp}${focus.state === 'groundedDead' ? ` · 2 米内按 ${this.key('interact')} 拾取` : ` · 活鱼 ${living.filter(fish => fish.state === 'groundedAlive').length}`}`;
-    this.attackFeedback.hidden = mode !== 'combat';
+    this.attackFeedback.hidden = mode !== 'combat' || (!attacking && state.attackCooldownRemaining === 0);
     const weapon = WEAPONS[state.currentWeapon]; const usedWeapon = WEAPONS[state.attack.weaponId];
     const feedback = attacking && state.attack.result !== 'none' ? state.attack.result === 'kill' ? `${usedWeapon.name}击杀 · ${state.attack.targetKind==='boss'?'章鱼已败':'鱼已死亡'}` : state.attack.result === 'hit' ? `${usedWeapon.name}命中${state.attack.targetKind==='boss'?'章鱼':''} · 伤害 ${usedWeapon.damage}` : `${usedWeapon.name}挥空` : state.attackCooldownRemaining > 0 ? `${weapon.name} · 攻击恢复中` : `${weapon.name}已就绪`;
     this.attackFeedback.textContent = `${feedback} · ${state.attackCooldownRemaining > 0 ? `冷却 ${state.attackCooldownRemaining.toFixed(2)} s` : '点击左键攻击'}`;
@@ -404,8 +357,13 @@ export class UI {
     this.fishNotice.hidden = !escaped || state.simulationTick - escaped.escapedTick > 360;
     this.fishNotice.textContent = escaped ? `${FISH_SPECIES[escaped.species].name}逃入海中` : '';
     this.castDistance.hidden = mode !== 'fishing' || carrying;
-    this.chargeTrack.hidden = mode !== 'fishing' || carrying || reeling || fishing.phase === 'bite';
+    this.chargeTrack.hidden = mode !== 'fishing' || carrying || fishing.phase !== 'charging';
     this.reelMeters.hidden = !reeling;
+    const pull=document.querySelector<HTMLElement>('#pull-feedback')!;
+    pull.hidden=!reeling;
+    const pullAngle=Math.round(Math.atan2(fishing.pullDirection.y,fishing.pullDirection.x)/(Math.PI/4));
+    const arrows=['→','↗','↑','↖','←','↙','↓','↘'];
+    pull.textContent='鱼向 '+arrows[(pullAngle+8)%8]+' 拉扯 · 反向牵引 '+Math.round(fishing.counterStrength*100)+'%';
     this.tensionValue.textContent = fishing.tension.toFixed(1); this.progressValue.textContent = fishing.progress.toFixed(1);
     this.tensionFill.style.width = `${fishing.tension}%`; this.progressFill.style.width = `${fishing.progress}%`;
     this.fishingInfo.classList.toggle('danger-tension', fishing.tension >= 90 || fishing.tension <= 10);
@@ -417,14 +375,14 @@ export class UI {
     this.fishingInfo.classList.toggle('invalid-cast', !fishing.preview.valid && mode === 'fishing');
     if (carrying) {
       this.fishingStatus.textContent = `${definition!.name} · 捕获成功 · 已拿在手中`;
-      this.fishingHelp.textContent = `持鱼时不能抛竿 · ${this.key('interact')} 放鱼 · ${this.key('inventory')} 背包`;
+      this.fishingHelp.textContent = `持鱼时不能抛竿 · ${this.key('interact')} 放鱼 · 上岸后放下`;
     } else if (fishing.phase === 'bite') {
       this.fishingStatus.textContent = '咬钩了！点击左键提杆'; this.fishingHelp.textContent = paused ? '计时已冻结 · 点击继续后再提杆' : '抓住浮漂下沉的瞬间';
     } else if (reeling) {
       this.fishingStatus.textContent = fishing.struggling ? `${definition!.name}正在挣扎` : `收杆中 · ${definition!.name}`;
-      this.fishingHelp.textContent = paused ? '计时已冻结 · 继续后重新按住左键' : '按住左键拉近 · 松开降低张力 · 避免满张力或零张力';
+      this.fishingHelp.textContent = paused ? '计时已冻结 · 继续后重新按住左键' : '鼠标反向拉杆 · 按住收鱼，松开缓解张力';
     } else if (mode === 'combat') {
-      this.fishingStatus.textContent = `${weapon.name} · 战斗模式`; this.fishingHelp.textContent = `伤害 ${weapon.damage} · 射程 ${weapon.range} m · 单次点击攻击 · ${['weapon1','weapon2','weapon3','weapon4'].map(action=>this.key(action as BindingAction)).join('/')} 换武器 · ${this.key('toggleMode')} 钓鱼`;
+      this.fishingStatus.textContent = `${weapon.name} · 战斗模式`; this.fishingHelp.textContent = `伤害 ${weapon.damage} · 射程 ${weapon.range} m`;
     } else if (fishing.phase === 'waiting') {
       this.fishingStatus.textContent = '等待中 · 浮漂已入水';
       this.fishingHelp.textContent = `看住浮漂 · 咬钩时点击左键提杆 · ${this.key('cancelFishing')} 取消`;
@@ -439,6 +397,7 @@ export class UI {
         : fishing.preview.valid ? '有效海水落点' : reason;
       this.fishingHelp.textContent = '走近岸边 · 按住左键蓄力，松开抛竿';
     }
+    this.updateWeapons(state);
   }
 
   private updateBoss(state: GameState): void {
@@ -458,25 +417,26 @@ export class UI {
   }
 
   private updateWeapons(state: GameState): void {
-    this.weaponBar.hidden = state.gamePhase !== 'running';
-    for (const container of [this.weaponBar, this.inventoryWeapons]) {
-      for (const button of container.querySelectorAll<HTMLButtonElement>('.equip-weapon')) {
-        const id = WEAPON_IDS.find(id => id === button.dataset.weaponId)!;
-        const unlocked = state.unlockedWeapons.includes(id);
-        button.disabled = !unlocked; button.setAttribute('aria-pressed', String(state.currentWeapon === id));
-        button.querySelector('kbd')!.textContent = this.key(`weapon${WEAPON_IDS.indexOf(id)+1}` as BindingAction);
-        button.title = unlocked ? `装备${WEAPONS[id].name} · 伤害 ${WEAPONS[id].damage} · 射程 ${WEAPONS[id].range} m` : `未解锁 · 商店 ${WEAPONS[id].price} 金币`;
-      }
+    this.weaponBar.hidden=state.gamePhase!=='running';
+    const species=['sprat','bass','tuna','golden'] as const;
+    for(const button of this.weaponBar.querySelectorAll<HTMLButtonElement>('[data-slot]')){
+      const index=Number(button.dataset.slot),weapon=WEAPON_IDS[index-1];
+      const locked=index>1&&index<5&&!state.unlockedWeapons.includes(weapon);
+      button.setAttribute('aria-pressed',String(state.selectedSlot===index));button.setAttribute('aria-disabled',String(locked));
+      button.querySelector('kbd')!.textContent=this.key(`slot${index+1}` as BindingAction);
+      button.querySelector('.slot-count')!.textContent=locked?'未解锁':index>=5?String(state.inventory.filter(f=>f.species===species[index-5]).length):'';
     }
-    for (const button of this.purchaseList.querySelectorAll<HTMLButtonElement>('.buy-weapon')) {
-      const id = WEAPON_IDS.find(id => id === button.dataset.weaponId)!;
-      const unlocked = state.unlockedWeapons.includes(id); button.disabled = unlocked;
-      button.textContent = unlocked ? `${WEAPONS[id].name}已解锁` : `购买${WEAPONS[id].name} · ${WEAPONS[id].price} 金币`;
+    for(const button of this.purchaseList.querySelectorAll<HTMLButtonElement>('.buy-weapon')){
+      const id=button.dataset.weaponId as typeof WEAPON_IDS[number];button.disabled=state.unlockedWeapons.includes(id);
+      button.textContent=button.disabled?'已购买':`购买 · ${WEAPONS[id].price} 金币`;
     }
-    const element = document.querySelector<HTMLElement>('#weapon-feedback')!;
-    element.hidden = state.gamePhase !== 'running';
-    if (state.lastAction.reason === 'weapon-locked') element.textContent = '武器未解锁 · 请到商店购买';
-    else element.textContent = `已装备${WEAPONS[state.currentWeapon].name} · ${state.mode === 'fishing' ? `${this.key('toggleMode')} 进入战斗` : '单次点击左键攻击'}`;
+    const errors:Record<string,string>={'weapon-locked':'尚未购买这件工具','carrying-fish':'先把活鱼放在地上','empty-slot':'这里没有鱼','hunger-full':'现在不饿，先留着吧','in-water':'需要先上岸','inventory-full':'最多携带10条鱼','attack-active':'动作还没结束'};
+    const element=document.querySelector<HTMLElement>('#weapon-feedback')!;
+    element.hidden=state.gamePhase!=='running'||!errors[state.lastAction.reason];element.textContent=errors[state.lastAction.reason]??'';
+    const wet=state.locomotion==='swimming';document.querySelector<HTMLElement>('#oxygen')!.hidden=!wet;
+    document.querySelector('#oxygen-value')!.textContent=state.player.oxygen.toFixed(1)+' s';
+    document.querySelector<HTMLElement>('#underwater-tint')!.hidden=!state.submerged;
+    this.fishingInfo.hidden=state.gamePhase!=='running'||state.selectedSlot>=5||(state.fishing.phase==='idle'&&!state.fish.some(f=>f.state==='carried'));
   }
 
   private updateShop(state: GameState): void {
@@ -486,10 +446,10 @@ export class UI {
     if (signature !== this.shopSignature) {
       this.shopSignature = signature; this.shopList.replaceChildren();
       if (!state.inventory.some(item => item.id === this.selectedShopFishId)) this.selectedShopFishId = null;
-      if (!state.inventory.length) this.shopList.textContent = `背包为空，没有可出售尸体。先击杀岸上活鱼，再走近按 ${this.key('interact')} 拾取。`;
+      if (!state.inventory.length) this.shopList.textContent = `没有可出售的鱼。先击杀岸上的鱼，拾取后再来。`;
       for (const item of state.inventory) {
         const button = document.createElement('button'); button.type = 'button'; button.className = 'shop-item'; button.dataset.fishId = item.id;
-        button.textContent = `${FISH_SPECIES[item.species].name} · ${SALE_PRICES[item.species]} 金币 · ${item.id}`;
+        button.textContent = `${FISH_SPECIES[item.species].name} · ${SALE_PRICES[item.species]} 金币`;
         button.addEventListener('click', () => { this.selectedShopFishId = item.id; this.updateShop(this.currentState!); });
         this.shopList.append(button);
       }
@@ -497,41 +457,17 @@ export class UI {
     for (const button of this.shopList.querySelectorAll<HTMLButtonElement>('button')) button.setAttribute('aria-pressed', String(button.dataset.fishId === this.selectedShopFishId));
     const selected = state.inventory.find(item => item.id === this.selectedShopFishId);
     this.sellButton.disabled = !selected;
-    this.shopDetail.textContent = selected ? `${FISH_SPECIES[selected.species].name}：出售获得 ${SALE_PRICES[selected.species]} 金币。售出后不能再食用。` : state.inventory.length ? '选择一条鱼查看售价。' : '没有可出售的物品。';
-    const errors: Record<string,string> = {'not-in-inventory':'物品已消费或不在背包中 · 未增加金币', 'invalid-sell':'请选择有效背包尸体 · 未增加金币', 'shop-not-open':'请先打开商店', 'coin-limit':'金币无法精确交易 · 保留物品和解锁状态', 'insufficient-coins':'金币不足 · 未扣费', 'already-unlocked':'武器已解锁 · 未重复扣费', 'invalid-buy':'无效武器购买 · 未扣费'};
+    this.shopDetail.textContent = selected ? `${FISH_SPECIES[selected.species].name}：出售获得 ${SALE_PRICES[selected.species]} 金币。售出后不能再食用。` : state.inventory.length ? '选择一条鱼查看售价。' : '';
+    const errors: Record<string,string> = {'not-in-inventory':'物品已消费或不在物品中 · 未增加金币', 'invalid-sell':'请选择有效死鱼 · 未增加金币', 'shop-not-open':'请先打开商店', 'coin-limit':'金币无法精确交易 · 保留物品和解锁状态', 'insufficient-coins':'金币不足 · 未扣费', 'already-unlocked':'武器已解锁 · 未重复扣费', 'invalid-buy':'无效武器购买 · 未扣费'};
     if (state.lastAction.reason === 'sell') {
       const sold = state.terminalFish.findLast(fish => fish.state === 'sold');
       this.shopStatus.textContent = sold ? `已出售 ${FISH_SPECIES[sold.species].name} · +${sold.price} 金币` : '';
     } else if (state.lastAction.reason === 'buy') {
       const bought = state.events.findLast(event => event.type === 'buy');
       const id = WEAPON_IDS.find(id => id === bought?.entityId);
-      this.shopStatus.textContent = id ? `已购买${WEAPONS[id].name} · -${WEAPONS[id].price} 金币 · 按 ${this.key(`weapon${WEAPON_IDS.indexOf(id) + 1}` as BindingAction)} 或在背包装备` : '';
+      this.shopStatus.textContent = id ? `已购买${WEAPONS[id].name} · -${WEAPONS[id].price} 金币 · 按 ${this.key(`slot${WEAPON_IDS.indexOf(id) + 2}` as BindingAction)} 在快捷栏选择` : '';
     } else if (errors[state.lastAction.reason]) this.shopStatus.textContent = errors[state.lastAction.reason];
     else if (['reset','restart','openShop'].includes(state.lastAction.reason)) this.shopStatus.textContent = '';
-  }
-
-  private updateInventory(state: GameState): void {
-    this.inventoryCount.textContent = `${state.inventory.length} / ${INVENTORY_CAPACITY}`;
-    this.inventoryVitals.textContent = `生命 ${Number(state.player.hp.toFixed(1))} / 100　饥饿 ${Number(state.player.hunger.toFixed(1))} / 100`;
-    const signature = JSON.stringify(state.inventory);
-    if (signature !== this.inventorySignature) {
-      this.inventorySignature = signature; this.inventoryList.replaceChildren();
-      if (!state.inventory.some(item => item.id === this.selectedFishId)) this.selectedFishId = null;
-      if (!state.inventory.length) this.inventoryList.textContent = `背包为空。击杀岸上活鱼后，走近尸体按 ${this.key('interact')} 拾取。`;
-      for (const item of state.inventory) {
-        const button = document.createElement('button'); button.type = 'button'; button.className = 'inventory-item'; button.dataset.fishId = item.id;
-        button.textContent = `${FISH_SPECIES[item.species].name} · +${FOOD[item.species]} 饥饿 · ${item.id}`;
-        button.addEventListener('click', () => { this.selectedFishId = item.id; this.updateInventory(this.currentState!); });
-        this.inventoryList.append(button);
-      }
-    }
-    for (const button of this.inventoryList.querySelectorAll<HTMLButtonElement>('button')) button.setAttribute('aria-pressed', String(button.dataset.fishId === this.selectedFishId));
-    const selected = state.inventory.find(item => item.id === this.selectedFishId);
-    this.eatButton.disabled = !selected;
-    this.foodDetail.textContent = selected ? `${FISH_SPECIES[selected.species].name}：恢复 ${FOOD[selected.species]} 饥饿，不恢复生命。` : '选择一条鱼查看恢复值。';
-    const results: Record<string,string> = { eat:'已食用 · 物品消耗一次，生命不变', 'hunger-full':'饥饿已满 · 未消耗物品', 'not-in-inventory':'物品已消耗或不在背包中', 'invalid-eat':'食用操作无效' };
-    if (results[state.lastAction.reason]) this.inventoryStatus.textContent = results[state.lastAction.reason];
-    else if (['reset','restart','openInventory'].includes(state.lastAction.reason)) this.inventoryStatus.textContent = '';
   }
 
   fatal(message: string): void {

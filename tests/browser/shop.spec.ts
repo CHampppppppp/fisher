@@ -3,7 +3,7 @@ import type { IslandTest } from '../../src/testing/test-api.ts';
 declare global { interface Window { __islandTest?: IslandTest } }
 
 async function lock(page: import('@playwright/test').Page) {
-  await page.keyboard.press('Escape'); await page.getByRole('button',{name:'继续探索'}).click();
+  await page.keyboard.press('Escape'); await page.getByRole('button',{name:'继续游戏'}).click();
   await expect.poll(()=>page.evaluate(()=>Boolean(document.pointerLockElement))).toBe(true);
 }
 const inventory=[{id:'sprat-sale',species:'sprat'},{id:'trade-1',species:'bass'},{id:'tuna-sale',species:'tuna'},{id:'gold-sale',species:'golden'}];
@@ -22,7 +22,7 @@ test('actual E opens the counter, lists exact prices and sells one original corp
   expect(state.terminalFish[0].state).toBe('sold');expect(state.terminalFish[0].id).toBe('trade-1');expect(state.events.filter(e=>e.type==='sell')).toHaveLength(1);
   await expect(page.locator('#shop-balance')).toContainText('40');await expect(page.locator('#coins-value')).toHaveText('40');await expect(page.locator('#shop-status')).toContainText('已出售');
   await page.evaluate(()=>window.__islandTest!.dispatch({type:'sell',fishId:'trade-1'}));await expect(page.locator('#shop-status')).toContainText('已消费或不在背包');
-  await expect(page.locator('#fish-notice')).toBeHidden();await page.locator('#close-shop').click();await page.keyboard.up('KeyW');await page.evaluate(()=>window.__islandTest!.advanceTicks(1));
+  await expect(page.locator('#fish-notice')).toBeHidden();await page.locator('#close-shop').click();expect((await page.evaluate(()=>window.__islandTest!.getState())).gamePhase).toBe('paused');await lock(page);await page.keyboard.up('KeyW');await page.evaluate(()=>window.__islandTest!.advanceTicks(1));
   state=await page.evaluate(()=>window.__islandTest!.getState());expect(state.player.position).toEqual(frozen.player.position);expect(state.player.hp).toBeCloseTo(80-1/30,6);expect(state.player.hunger).toBeCloseTo(19.5-1/600,6);expect(state.coins).toBe(40);
   expect(errors).toEqual([]);
 });
@@ -37,9 +37,9 @@ test('1920 shop pauses reel and survival; blur keeps pause on close, empty and s
   for(const id of ['shop-balance','sell-button','close-shop','shop-vitals']) await expect(page.locator(`#${id}`)).toBeInViewport();
   await page.locator('.shop-item').click();await page.locator('#sell-button').click();await expect(page.locator('#shop-balance')).toContainText('140');await expect(page.locator('#shop-list')).toContainText('背包为空');
   await expect(page.locator('#sell-button')).toBeDisabled();await page.evaluate(()=>window.__islandTest!.dispatch({type:'sell',fishId:'gold'}));await expect(page.locator('#shop-status')).toContainText('已消费或不在背包');
-  await page.screenshot({path:test.info().outputPath('shop-empty-1920.png')});await page.locator('#close-shop').click();await expect(page.getByRole('button',{name:'继续探索'})).toBeVisible();
+  await page.screenshot({path:test.info().outputPath('shop-empty-1920.png')});await page.locator('#close-shop').click();await expect(page.getByRole('button',{name:'继续游戏'})).toBeVisible();
   await page.evaluate(()=>window.__islandTest!.advanceTicks(300));const paused=await page.evaluate(()=>window.__islandTest!.getState());expect(paused.player).toEqual(frozen.player);expect(paused.fishing).toEqual(frozen.fishing);
-  await page.getByRole('button',{name:'继续探索'}).click();await page.evaluate(()=>window.__islandTest!.advanceTicks(6));const after=await page.evaluate(()=>window.__islandTest!.getState());
+  await page.getByRole('button',{name:'继续游戏'}).click();await page.evaluate(()=>window.__islandTest!.advanceTicks(6));const after=await page.evaluate(()=>window.__islandTest!.getState());
   expect(after.fishing.progress).toBe(frozen.fishing.progress);expect(after.fishing.tension).toBeCloseTo(frozen.fishing.tension-2,6);expect(after.coins).toBe(140);
 });
 

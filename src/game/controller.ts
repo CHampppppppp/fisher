@@ -2,7 +2,6 @@ import type { Game } from './game.ts';
 import type { GameClock } from './clock.ts';
 import type { UI } from '../ui/ui.ts';
 import type { GameState } from './types.ts';
-import { WEAPON_IDS } from './weapons.ts';
 import type { Persistence } from './persistence.ts';
 import { bindingAction, bindingCodes } from './settings.ts';
 import type { BindingAction } from './settings.ts';
@@ -25,7 +24,7 @@ export class Controller {
     }, options);
     ui.button.addEventListener('click', () => {
       if (['dead','victory'].includes(this.game.getState().gamePhase)) {
-        if (!window.confirm('重新开始？当前背包、鱼和探索进度会清除。')) return;
+        if (!window.confirm('重新开始？当前物品和本局进度会清除。')) return;
         this.dispatch({type:'restart',confirm:true});
       }
       void this.startFromClick();
@@ -39,26 +38,14 @@ export class Controller {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-binding-action]');
       if (button) { ui.captureBinding(button.dataset.bindingAction as BindingAction); this.draw(); }
     }, options);
-    ui.inventoryButton.addEventListener('click', () => this.dispatch({type:'openInventory'}), options);
-    ui.pauseInventoryButton.addEventListener('click', () => this.dispatch({type:'openInventory'}), options);
-    ui.closeInventoryButton.addEventListener('click', () => this.dispatch({type:'closeInventory'}), options);
-    ui.eatButton.addEventListener('click', () => this.dispatch({type:'eat',fishId:ui.selectedFishId}), options);
     ui.shopButton.addEventListener('click', () => this.dispatch({type:'openShop'}), options);
     ui.closeShopButton.addEventListener('click', () => this.dispatch({type:'closeShop'}), options);
     ui.sellButton.addEventListener('click', () => this.dispatch({type:'sell',fishId:ui.selectedShopFishId}), options);
-    const weaponClick = (event: Event) => {
-      const button = (event.target as HTMLElement).closest<HTMLButtonElement>('.equip-weapon');
-      if (button && !button.disabled) this.dispatch({type:'equip',weaponId:button.dataset.weaponId});
-    };
-    ui.weaponBar.addEventListener('click', weaponClick, options);
-    ui.inventoryWeapons.addEventListener('click', weaponClick, options);
+    ui.weaponBar.addEventListener('click', event=>{const b=(event.target as HTMLElement).closest<HTMLButtonElement>('[data-slot]');if(b)this.dispatch({type:'selectSlot',index:Number(b.dataset.slot)});},options);
     ui.purchaseList.addEventListener('click', event => {
       const button = (event.target as HTMLElement).closest<HTMLButtonElement>('.buy-weapon');
       if (button && !button.disabled) this.dispatch({type:'buy',weaponId:button.dataset.weaponId});
     }, options);
-    ui.modeButton.addEventListener('click', () => this.dispatch({
-      type: 'setMode', mode: this.game.getState().mode === 'fishing' ? 'combat' : 'fishing',
-    }), options);
     ui.cancelButton.addEventListener('click', () => this.dispatch({ type: 'cancelFishing' }), options);
     ui.placeButton.addEventListener('click', () => this.dispatch({ type: 'interact' }), options);
     ui.restartButton.addEventListener('click', () => {
@@ -88,8 +75,16 @@ export class Controller {
     document.addEventListener('keydown', event => {
       if (event.code === 'Escape') {
         event.preventDefault();
-        if (ui.rebindingAction) { ui.rebindingAction = null; ui.setSettingsMessage('已取消绑定 · Esc 仍用于暂停'); }
-        this.pause(); return;
+        if (event.repeat) return;
+        if (ui.rebindingAction) {
+          ui.rebindingAction = null; this.draw(); ui.setSettingsMessage('已取消绑定'); return;
+        }
+        if (ui.closeHelp()) return;
+        const menu = this.game.getState().ui.menu;
+        if (menu === 'settings') this.dispatch({type:'closeSettings'});
+        else if (menu === 'shop') this.dispatch({type:'closeShop'});
+        else this.pause();
+        return;
       }
       const state = this.game.getState();
       if (state.ui.menu === 'settings') {
@@ -99,32 +94,38 @@ export class Controller {
         }
         return; // Native Tab, arrows, Space and Enter operate the settings controls.
       }
+      if(event.code==='Tab'&&state.gamePhase==='running'){event.preventDefault();return;}
       const action = bindingAction(state.settings,event.code);
+      if (event.code==='Tab'&&state.ui.menu==='shop'){event.preventDefault();this.dispatch({type:'closeShop'});return;}
       if (!action || event.repeat) return;
-      if (action === 'inventory' && !['dead','victory'].includes(state.gamePhase)) {
-        event.preventDefault(); const menu = state.ui.menu;
-        this.dispatch({type:menu === 'shop' ? 'closeShop' : menu === 'inventory' ? 'closeInventory' : 'openInventory'}); return;
+      if (event.code==='Tab'&&state.ui.menu==='shop'){event.preventDefault();this.dispatch({type:'closeShop'});return;}
+      if (action.startsWith('slot')) {
+        if(!this.canControl())return;event.preventDefault();this.dispatch({type:'selectSlot',index:Number(action.at(-1))-1});return;
       }
-      if (action.startsWith('weapon')) {
-        event.preventDefault(); this.dispatch({type:'equip',weaponId:WEAPON_IDS[Number(action.at(-1))-1]}); return;
-      }
-      if (state.gamePhase === 'running' && ['toggleMode','cancelFishing','interact'].includes(action)) {
+      if (state.gamePhase === 'running' && ['cancelFishing','interact'].includes(action)) {
         event.preventDefault();
-        this.dispatch(action === 'interact' ? {type:'interact'} : action === 'toggleMode'
-          ? {type:'setMode',mode:state.mode === 'fishing' ? 'combat' : 'fishing'} : {type:'cancelFishing'}); return;
+        this.dispatch(action === 'interact' ? {type:'interact'} : {type:'cancelFishing'}); return;
       }
       if (!this.canControl()) return;
       event.preventDefault();
-      if (action === 'jump') { this.dispatch({type:'jump'}); return; }
+      if (action === 'jump') {this.keys.add(event.code);if(state.locomotion!=='swimming')this.dispatch({type:'jump'});this.updateMove();return;}
+      if(action==='dive'){this.keys.add(event.code);this.updateMove();return;}
       if (['forward','backward','left','right','sprint'].includes(action)) { this.keys.add(event.code); this.updateMove(); }
     }, options);
+    document.addEventListener('wheel',event=>{if(!this.canControl()||event.deltaY===0)return;event.preventDefault();this.dispatch({type:'cycleSlot',delta:event.deltaY>0?1:-1});},{...options,passive:false});
     document.addEventListener('keyup', event => {
       const releasedMovement = this.keys.delete(event.code);
       if (releasedMovement && this.canControl()) this.updateMove();
     }, options);
     document.addEventListener('mousemove', event => {
       if (!this.canControl()) return;
-      const {player: p, settings} = this.game.getState();
+      const state=this.game.getState();const {player:p,settings}=state;
+      if(state.fishing.phase==='reeling') {
+        let x=state.fishing.rodOffset.x+event.movementX*settings.sensitivity/200;
+        let y=state.fishing.rodOffset.y-event.movementY*settings.sensitivity/200;
+        const length=Math.max(1,Math.hypot(x,y));x/=length;y/=length;
+        this.dispatch({type:'pull',x,y});
+      }
       this.dispatch({ type: 'look', yaw: p.yaw + event.movementX * 0.002 * settings.sensitivity, pitch: p.pitch - event.movementY * 0.002 * settings.sensitivity });
     }, options);
     document.addEventListener('mousedown', event => {
@@ -133,7 +134,8 @@ export class Controller {
         if (this.pointerFree && this.game.getState().gamePhase === 'running') void this.startFromClick(true);
         return;
       }
-      this.primaryHeld = this.dispatch({ type: 'primaryDown' }).accepted;
+      if(this.primaryHeld)return;
+      this.primaryHeld=true;this.dispatch({ type: 'primaryDown' });
     }, options);
     document.addEventListener('mouseup', event => {
       if (event.button !== 0 || !this.primaryHeld) return;
@@ -175,6 +177,7 @@ export class Controller {
   private updateMove(): void {
     const settings = this.game.getState().settings;
     const held = (action: BindingAction) => Number(bindingCodes(action,settings.bindings[action]).some(code=>this.keys.has(code)));
+    this.dispatch({type:'swim',vertical:held('jump')-held('dive')});
     this.dispatch({ type: 'move', forward:held('forward')-held('backward'), strafe:held('right')-held('left'), sprint:Boolean(held('sprint')) });
   }
 
@@ -182,17 +185,23 @@ export class Controller {
 
   dispatch(action: unknown): GameState['lastAction'] {
     if (this.loading) return {accepted:false,reason:'storage-busy'};
+    // Closing a player-facing page returns to pause, never directly to live play.
+    if (action && typeof action === 'object' && Object.keys(action).length === 1) {
+      const type = (action as {type?:string}).type;
+      const menu = this.game.getState().ui.menu;
+      if ((type === 'closeInventory' && menu === 'inventory') || (type === 'closeShop' && menu === 'shop')) this.game.dispatch({type:'pause'});
+    }
     const result = this.game.dispatch(action);
     if (result.accepted && result.reason === 'pause') this.pause();
     else if (result.accepted && result.reason === 'resume') this.resume();
-    else if (result.accepted && this.game.getState().mode === 'fishing' && ['primaryDown', 'primaryUp'].includes(result.reason)) this.keys.clear();
+    else if (result.accepted && this.game.getState().mode === 'fishing' && this.game.getState().fishing.phase!=='charging' && ['primaryDown', 'primaryUp'].includes(result.reason)) this.keys.clear();
     else if (result.accepted && ['openInventory','closeInventory','openShop','closeShop','openSettings','closeSettings'].includes(result.reason)) {
       this.clearInput(); this.clock.resetTime(); this.awaitingLock = false; this.lockForHud = false;
       this.pointerFree = ['closeInventory','closeShop'].includes(result.reason) && this.game.getState().gamePhase === 'running';
       this.ui.setPointerFree(this.pointerFree);
       if (document.pointerLockElement === this.ui.canvas) document.exitPointerLock();
     }
-    else if (result.accepted && ['setMode', 'cancelFishing', 'restart', 'settings-updated'].includes(result.reason)) {
+    else if (result.accepted && ['selectSlot','setMode', 'cancelFishing', 'restart', 'settings-updated'].includes(result.reason)) {
       this.clearInput();
       if (result.reason === 'restart') {
         this.clock.resetTime(); this.awaitingLock = false;
@@ -201,10 +210,10 @@ export class Controller {
       }
     }
     this.draw();
-    if (result.accepted && result.reason === 'openInventory') this.ui.closeInventoryButton.focus();
     if (result.accepted && result.reason === 'openShop') this.ui.closeShopButton.focus();
     if (result.accepted && result.reason === 'openSettings') this.ui.volumeInput.focus();
     if (result.accepted && result.reason === 'closeSettings') this.ui.settingsButton.focus();
+    if (result.accepted && ['closeInventory','closeShop'].includes(result.reason)) this.ui.button.focus();
     return result;
   }
 

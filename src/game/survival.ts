@@ -5,7 +5,7 @@ import { shopBlocks } from './fishing.ts';
 export const INVENTORY_CAPACITY = 10;
 export const FOOD = Object.freeze({ sprat: 12, bass: 20, tuna: 30, golden: 40 });
 
-/** Fixed-step hunger calculation; version-1 saves use a normalized baseline. */
+/** Fixed-step hunger calculation; v2 saves use a normalized baseline. */
 export class Survival {
   private hungerTicks = 0;
   private damageTicks = 0;
@@ -16,8 +16,7 @@ export class Survival {
   }
 
   static restore(value: ReturnType<Survival['snapshot']>): Survival {
-    const result = new Survival(value.hpBase, Math.max(0, value.hungerBase - value.hungerTicks / 120));
-    // Existing v1 files counted hunger at 1/120 per tick; retain their current value.
+    const result = new Survival(value.hpBase, Math.max(0, value.hungerBase - value.hungerTicks / 600));
     result.damageTicks = value.damageTicks;
     return result;
   }

@@ -1,10 +1,10 @@
-export const BINDING_ACTIONS = ['forward','backward','left','right','sprint','jump','interact','inventory','toggleMode','cancelFishing','weapon1','weapon2','weapon3','weapon4'] as const;
+export const BINDING_ACTIONS = ['forward','backward','left','right','sprint','jump','dive','interact','cancelFishing','slot1','slot2','slot3','slot4','slot5','slot6','slot7','slot8','slot9'] as const;
 export type BindingAction = typeof BINDING_ACTIONS[number];
 export interface Settings { volume: number; sensitivity: number; bindings: Record<BindingAction,string> }
-export const SETTINGS_KEY = 'island-fishing-settings-v1';
+export const SETTINGS_KEY = 'island-fishing-settings-v2';
 export const SENSITIVITY = Object.freeze({ min:.25, max:3, default:1 });
-export const BINDING_LABELS:Record<BindingAction,string> = {forward:'前进',backward:'后退',left:'左移',right:'右移',sprint:'冲刺',jump:'跳跃',interact:'交互 / 放鱼 / 拾取',inventory:'背包 / 关闭菜单',toggleMode:'切换钓鱼与战斗',cancelFishing:'取消钓鱼',weapon1:'装备拳头',weapon2:'装备木棍',weapon3:'装备鱼叉',weapon4:'装备重锤'};
-export function defaultSettings(): Settings {return {volume:100,sensitivity:1,bindings:{forward:'KeyW',backward:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft',jump:'Space',interact:'KeyE',inventory:'Tab',toggleMode:'KeyQ',cancelFishing:'KeyR',weapon1:'Digit1',weapon2:'Digit2',weapon3:'Digit3',weapon4:'Digit4'}};}
+export const BINDING_LABELS:Record<BindingAction,string> = {forward:'前进',backward:'后退',left:'左移',right:'右移',sprint:'冲刺',jump:'跳跃 / 上浮',dive:'下潜',interact:'交互 / 放鱼 / 拾取',cancelFishing:'收回鱼竿',slot1:'鱼竿',slot2:'拳头',slot3:'木棍',slot4:'鱼叉',slot5:'重锤',slot6:'银鳍鱼',slot7:'岩鲈鱼',slot8:'蓝背鱼',slot9:'金鳞鱼'};
+export function defaultSettings(): Settings {return {volume:100,sensitivity:1,bindings:{forward:'KeyW',backward:'KeyS',left:'KeyA',right:'KeyD',sprint:'ShiftLeft',jump:'Space',dive:'ControlLeft',interact:'KeyE',cancelFishing:'KeyR',slot1:'Digit1',slot2:'Digit2',slot3:'Digit3',slot4:'Digit4',slot5:'Digit5',slot6:'Digit6',slot7:'Digit7',slot8:'Digit8',slot9:'Digit9'}};}
 export class SettingsError extends Error {constructor(readonly reason:string){super(reason);}}
 function fail(reason:string):never {throw new SettingsError(reason);}
 function record(value:unknown): value is Record<string,unknown> {return Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&Object.getPrototypeOf(value)===Object.prototype;}
@@ -15,7 +15,7 @@ export function keyLabel(code:string):string {
 }
 export function bindingCodes(action:BindingAction,code:string):string[] {
   if(action==='sprint'&&code==='ShiftLeft')return [code,'ShiftRight'];
-  if(action.startsWith('weapon')&&code===`Digit${action.at(-1)}`)return [code,`Numpad${action.at(-1)}`];
+  if(action.startsWith('slot')&&code===`Digit${action.at(-1)}`)return [code,`Numpad${action.at(-1)}`];
   return [code];
 }
 export function bindingAction(settings:Settings,code:string):BindingAction|undefined {return BINDING_ACTIONS.find(action=>bindingCodes(action,settings.bindings[action]).includes(code));}
@@ -30,7 +30,7 @@ export function updateSettings(current:Settings,value:unknown):Settings {
   }
   const used=new Set<string>();
   for(const action of BINDING_ACTIONS){const code=next.bindings[action];
-    if(code==='Escape')fail('reserved-key');
+    if(['Escape','Tab'].includes(code))fail('reserved-key');
     if(typeof code!=='string'||!(/^(Key[A-Z]|Digit[0-9]|Numpad[0-9]|Arrow(Up|Down|Left|Right)|Shift(Left|Right)|Control(Left|Right)|Alt(Left|Right))$/.test(code)||['Space','Tab','Enter','Backspace','Delete','Home','End','PageUp','PageDown','BracketLeft','BracketRight','Comma','Period','Slash','Semicolon','Quote','Backslash','Minus','Equal'].includes(code)))fail('invalid-key');
     for(const accepted of bindingCodes(action,code)){if(used.has(accepted))fail('binding-conflict');used.add(accepted);}
   }

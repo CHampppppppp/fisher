@@ -52,7 +52,7 @@ test('all four actual catches show species name, rarity and distinct carried mod
     await expect(page.locator('#fishing-status')).toContainText(`${definition.name} · 捕获成功`);
     await expect(page.locator('#species-detail')).toContainText(definition.rarity);
     await expect(page.locator('#species-detail')).toBeInViewport();
-    await expect(page.locator('#restart-button')).toBeInViewport();
+    await expect(page.locator('#place-fish')).toBeInViewport();
     await page.screenshot({ path: test.info().outputPath(`${definition.id}-carried.png`) });
   }
   expect(errors).toEqual([]);

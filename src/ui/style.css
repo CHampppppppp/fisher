@@ -55,3 +55,57 @@
 @media(min-width:801px) and (max-height:800px){.settings-panel{padding:18px 26px}.setting-range{margin:10px 0}.settings-panel h3{margin-top:12px}#settings-bindings{gap:4px 24px}.binding-row button{min-height:32px}}
 
 #playtest-banner{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:9;margin:0;padding:6px 12px;background:#152e30ee;color:#ffe2a3;font-size:12px;pointer-events:none;white-space:nowrap}#playtest-entry{margin:12px 0;font-size:13px}#playtest-entry a{color:#ffe2a3;text-underline-offset:4px}#playtest-entry a:focus-visible{outline:2px solid #ffe2a3;outline-offset:4px}
+
+/* Playtest A: menus share one navigation hierarchy; HUD appears only during play. */
+.in-menu :is(#hud,#rare-progress,#boss-hud,#damage-flash,#fishing-info,#fishing-actions,#pointer-hint,#live-fish-status,#fish-notice,#interaction-feedback,#survival-warning,#shop-hint,#weapon-bar,#weapon-feedback){display:none!important}
+.identity{display:none}.in-menu .identity{display:block;top:32px;left:7.8vw;z-index:6}.in-menu:has(#menu[hidden]) .identity{display:none}
+#menu{z-index:5;padding:90px 7.8vw 35px;background:linear-gradient(90deg,#102e32f2,#102e32c9 35%,#102e3226 80%);overflow:auto}
+#menu .menu-content{width:360px;max-width:100%;max-height:none;overflow:visible;padding:0}
+#menu h1{font-size:clamp(32px,4vw,52px);letter-spacing:1px;line-height:1.2;margin:0 0 14px;font-weight:600}
+#menu #menu-description{font-size:14px;line-height:1.7;letter-spacing:0;margin:0 0 28px;color:#e5ece0}
+.menu-actions{display:flex;flex-direction:column;align-items:stretch;gap:2px}
+#menu .menu-actions button,#menu summary{margin:0;min-width:0;width:100%;min-height:42px;border:0;border-radius:0;box-shadow:none;background:transparent;color:#f6f0dc;padding:10px 4px;text-align:left;font-size:15px;letter-spacing:0;cursor:pointer}
+#menu .menu-actions button:hover,#menu summary:hover{background:#ffffff0c;transform:none;color:#ffe1a3}
+#menu #play-button{order:0;min-height:50px;margin:0 0 12px;padding:12px 18px;background:#ead3a8;color:#173b39;font-weight:600;display:block}
+#menu #play-button:hover{background:#f8dfac}#pause-inventory{order:1}#menu .storage-tools{order:2;border:0;padding:0;margin:0;max-width:none}#menu .storage-tools>div{display:flex;flex-direction:column;gap:2px}
+#menu #settings-button{order:3}#menu #menu-help{order:4}#menu #pause-restart{order:5;margin-top:12px;border-top:1px solid #e0d5b933;color:#d4d6ca;font-size:13px}
+body:not(.has-started) #menu [data-storage-action=save]{display:none}
+#menu .storage-status:empty,#menu #menu-message:empty{display:none}#menu .storage-status{font-size:12px;min-height:0;margin:6px 0;line-height:1.6}
+#menu-help summary{list-style:none;display:flex;justify-content:space-between;align-items:center}#menu-help summary::-webkit-details-marker{display:none}#menu-help summary::after{content:'+';color:#d5c6a3}#menu-help[open] summary::after{content:'−'}#menu-help summary:focus-visible{outline:3px solid #f4c26a;outline-offset:2px}
+.help-content{padding:10px 0 16px;border-bottom:1px solid #ffffff24}.help-content p{font-size:12px;line-height:1.8;color:#dce4d9;margin:12px 0 0}
+#controls{position:static;display:grid;grid-template-columns:1fr 1fr;gap:9px 16px;font-size:12px;text-shadow:none}#controls kbd{font-size:10px}
+#menu #playtest-entry{margin:24px 0 0;font-size:12px}#menu #playtest-entry a{color:#d1d9cb}#menu .lock-help{font-size:11px;margin:12px 0 0;letter-spacing:0;color:#b4c6bc}
+#playtest-banner{max-width:calc(100vw - 24px);white-space:normal;text-align:center;font-size:11px;line-height:1.5}
+#hud .compass{display:none}#hud .vitals{left:24px;bottom:26px;gap:18px}#hud .coins{right:24px;top:auto;bottom:30px;gap:8px}#hud .coins strong{font-size:18px}#hud .coin-symbol{display:none}
+#weapon-bar,.boss-active #weapon-bar{top:auto;right:auto;left:50%;bottom:22px;transform:translateX(-50%);flex-wrap:nowrap;width:max-content;overflow-x:auto;max-width:calc(100vw - 48px)}#weapon-bar .equip-weapon{padding:8px 10px;min-height:36px;flex-shrink:0;white-space:nowrap}
+#weapon-feedback,.boss-active #weapon-feedback{top:auto;right:auto;left:50%;bottom:62px;transform:translateX(-50%);max-width:85vw;text-align:center;font-size:11px}
+#rare-progress{top:24px;left:24px;max-width:240px;font-size:11px}#boss-hud{top:52px;max-width:42vw;width:400px;padding:8px 12px}#boss-attack-status{font-size:11px}
+#fishing-actions{right:24px;bottom:80px;gap:6px}#fishing-actions button{min-height:34px;padding:7px 10px;font-size:11px}#fishing-actions #inventory-button{display:none}#fishing-actions #restart-button{display:none}
+#fishing-info{bottom:112px;max-width:min(390px,calc(100vw - 48px));padding:10px 14px}#fishing-help{font-size:11px;line-height:1.6;margin:7px 0 0}
+#survival-warning{bottom:83px;left:24px;max-width:calc(100vw - 48px)}
+@media(max-width:800px){
+  #menu{padding:100px 26px 32px;align-items:flex-start;background:linear-gradient(90deg,#102e32ed,#102e328c)}.in-menu .identity{left:26px;top:36px}#menu .menu-content{width:100%;max-width:390px}#menu h1{font-size:34px}#menu #menu-description{margin-bottom:22px}
+  #hud .vitals{left:16px;bottom:74px;gap:14px}.vital{width:105px}#hud .coins{right:16px;bottom:80px}#weapon-bar,.boss-active #weapon-bar{bottom:20px;max-width:calc(100vw - 32px)}#weapon-feedback,.boss-active #weapon-feedback{bottom:116px}
+  #rare-progress{left:16px;top:70px;max-width:90vw}#boss-hud{top:100px;width:calc(100vw - 32px);max-width:none}#fishing-actions{right:16px;bottom:146px}#fishing-info{bottom:195px}#survival-warning{bottom:155px;left:16px}
+  .boss-active #shop-hint,.boss-active #fish-notice{top:205px}.boss-active #interaction-feedback{top:245px}.boss-active #pointer-hint{top:285px}
+}
+@media(max-height:760px) and (min-width:801px){#menu{padding-top:94px;padding-bottom:26px}#menu h1{font-size:36px}#menu #menu-description{margin-bottom:18px}#menu .menu-actions button,#menu summary{min-height:37px;padding-top:8px;padding-bottom:8px}#menu #play-button{min-height:46px}#menu #playtest-entry{margin-top:16px}}
+#pull-feedback{font-size:13px;line-height:1.7;color:#ffe5a8;margin:9px 0}.has-bite .fishing-heading{font-size:23px;font-weight:700;color:#fff1b6;text-shadow:0 2px 12px #182b2a}.has-bite #bite-window{font-size:16px}.has-bite{border-left:3px solid #f8cb71;background:#153f3ae8}
+
+/* v2: one nine-slot inventory, no modal backpack or duplicate mode controls. */
+#weapon-bar{display:flex;position:fixed;bottom:18px;left:50%;right:auto;transform:translateX(-50%);gap:4px;max-width:calc(100vw - 24px);padding:5px;background:#142c2bdd;border:1px solid #b5c2a768;z-index:3;}
+#weapon-bar button{position:relative;min-width:54px;width:64px;height:60px;padding:8px 3px 4px;border:1px solid #b9c5b36b;background:#294341;color:#f5eedb;display:grid;place-items:center;border-radius:0;font-size:11px;}
+#weapon-bar button[aria-pressed=true]{border:2px solid #f1ce83;background:#53604a;}
+#weapon-bar button[aria-disabled=true]{opacity:.45;}
+#weapon-bar kbd{position:absolute;top:1px;left:4px;font-size:9px;background:transparent;border:0;padding:0;}
+#weapon-bar .slot-name{margin-top:6px;}#weapon-bar .slot-count{font-size:10px;line-height:10px;}
+#oxygen{position:fixed;bottom:92px;left:50%;transform:translateX(-50%);z-index:3;color:#c9f5ff;font-size:14px;margin:0;}
+#underwater-tint{position:fixed;inset:0;background:#07567d77;pointer-events:none;z-index:1;}
+.in-menu #oxygen,.in-menu #underwater-tint{display:none!important;}
+#fishing-info{bottom:120px;}#weapon-feedback{bottom:92px;}#fishing-actions{bottom:100px;}
+#fishing-actions #restart-button{display:none;}#fishing-actions button{font-size:12px;padding:8px;}
+.shop-columns{grid-template-columns:1fr 1fr;}.shop-panel{max-width:800px;}
+#shop-menu .storage-tools,#shop-vitals{display:none;}.weapon-offer p{font-size:12px;}
+@media(max-width:650px){#weapon-bar button{min-width:0;width:calc((100vw - 78px)/9);font-size:9px;height:54px;}#weapon-bar{gap:2px;padding:4px;}#weapon-bar .slot-count{font-size:8px;}.shop-columns{grid-template-columns:1fr;}#fishing-info{max-width:calc(100vw - 32px);}}
+
+.in-menu .identity{display:none;}

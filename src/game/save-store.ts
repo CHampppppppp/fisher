@@ -1,6 +1,6 @@
 import type { SaveFile } from './save-format.ts';
 
-export const SAVE_DATABASE = 'island-fishing-survival';
+export const SAVE_DATABASE = 'island-fishing-survival-v2';
 export const SAVE_STORE = 'saves';
 export const SAVE_SLOT = 'current';
 const TIMEOUT_MS = 4500;

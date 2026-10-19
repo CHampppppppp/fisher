@@ -3,7 +3,7 @@ import type { IslandTest } from '../../src/testing/test-api.ts';
 declare global { interface Window { __islandTest?: IslandTest } }
 
 async function lock(page: import('@playwright/test').Page) {
-  await page.keyboard.press('Escape'); await page.getByRole('button',{name:'继续探索'}).click();
+  await page.keyboard.press('Escape'); await page.getByRole('button',{name:'继续游戏'}).click();
   await expect.poll(()=>page.evaluate(()=>Boolean(document.pointerLockElement))).toBe(true);
 }
 
@@ -29,7 +29,7 @@ test('real punches, E pickup and Tab food selection consume the same corpse exac
   expect(state.consumedFish[0].id).toBe(frozen.inventory[0].id); expect(state.events.filter(e=>e.type==='eat')).toHaveLength(1);
   await expect(page.locator('#inventory-status')).toContainText('已食用'); await expect(page.locator('#eat-button')).toBeDisabled();
   await expect(page.locator('#inventory-vitals')).toContainText('生命 80 / 100'); await expect(page.locator('#inventory-vitals')).toContainText('饥饿 100 / 100');
-  await page.locator('#close-inventory').click(); await page.evaluate(()=>window.__islandTest!.advanceTicks(60));
+  await page.locator('#close-inventory').click(); expect((await page.evaluate(()=>window.__islandTest!.getState())).gamePhase).toBe('paused'); await lock(page); await page.evaluate(()=>window.__islandTest!.advanceTicks(60));
   state=await page.evaluate(()=>window.__islandTest!.getState()); expect(state.player.hunger).toBe(99.9); expect(state.player.hp).toBe(80);
   expect(errors).toEqual([]);
 });
@@ -46,9 +46,9 @@ test('low hunger inventory freezes on blur, food is immediate, close still requi
   await page.locator('.inventory-item').filter({hasText:'金鳞鱼'}).click(); await page.locator('#eat-button').click();
   await expect(page.locator('#hunger-value')).toHaveText('59.5'); await expect(page.locator('#hp-value')).toHaveText('80');
   await page.screenshot({path:test.info().outputPath('inventory-food-1920.png')});
-  await page.locator('#close-inventory').click(); await expect(page.getByRole('button',{name:'继续探索'})).toBeVisible();
+  await page.locator('#close-inventory').click(); await expect(page.getByRole('button',{name:'继续游戏'})).toBeVisible();
   await page.evaluate(()=>window.__islandTest!.advanceTicks(300)); expect((await page.evaluate(()=>window.__islandTest!.getState())).player.hunger).toBe(59.5);
-  await page.getByRole('button',{name:'继续探索'}).click(); await page.keyboard.up('KeyW'); await page.evaluate(()=>window.__islandTest!.advanceTicks(60));
+  await page.getByRole('button',{name:'继续游戏'}).click(); await page.keyboard.up('KeyW'); await page.evaluate(()=>window.__islandTest!.advanceTicks(60));
   const after=await page.evaluate(()=>window.__islandTest!.getState()); expect(after.player.hunger).toBe(59.4); expect(after.player.hp).toBe(80); expect(after.player.position).toEqual(before.player.position);
 });
 

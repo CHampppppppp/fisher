@@ -8,7 +8,8 @@ export const castingDistance = (seconds: number): number => 3 + 15 * Math.min(1,
 
 export function idleFishing(preview: CastPreview): FishingState {
   return {
-    phase: 'idle', chargeSeconds: 0, cast: null, preview,
+    phase: 'idle', chargeSeconds: 0, cast: null, preview, lastCastTick:-1000,
+    pullDirection:{x:1,y:0}, rodOffset:{x:0,y:0}, counterStrength:0, directionRngState:1,
     progress: 0, tension: 0, species: null, biteRemaining: 0,
     highTensionDuration: 0, lowTensionDuration: 0, reelElapsed: 0,
     struggling: false, holding: false, result: null,

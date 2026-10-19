@@ -14,7 +14,7 @@ async function ready(page: import('@playwright/test').Page) {
     await window.__islandTest!.reset({ seed: 1, fixture: 'fish-arena' });
     await window.__islandTest!.dispatch({ type: 'setMode', mode: 'combat' });
   });
-  await page.keyboard.press('Escape'); await page.getByRole('button', { name: '继续探索' }).click();
+  await page.keyboard.press('Escape'); await page.getByRole('button', { name: '继续游戏' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
 }
 
@@ -56,7 +56,7 @@ test('real chase reaches a hopping fish; punching keeps held movement and pause 
   const moved = await page.evaluate(() => window.__islandTest!.getState()); expect(moved.player.position.z).toBeCloseTo(before.player.position.z + .3,6);
   await page.keyboard.press('Escape'); const paused = await page.evaluate(() => window.__islandTest!.getState());
   await page.evaluate(() => window.__islandTest!.advanceTicks(300)); expect(await page.evaluate(() => window.__islandTest!.getState())).toEqual(paused);
-  await page.getByRole('button', { name: '继续探索' }).click();
+  await page.getByRole('button', { name: '继续游戏' }).click();
   await expect.poll(() => page.evaluate(() => Boolean(document.pointerLockElement))).toBe(true);
   await page.evaluate(() => window.__islandTest!.advanceTicks(24)); await clickPrimary(page);
   await expect(page.locator('#attack-feedback')).toContainText('击杀');

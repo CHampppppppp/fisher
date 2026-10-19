@@ -1,9 +1,10 @@
+import {playerSpace,stepLocomotion} from './locomotion.ts';
 import { PHYSICS, STEP } from './types.ts';
 import type { GameState, Position, FishingState, Fish } from './types.ts';
-import { canOccupy, makeWorld, moveHorizontal, SHOP, landAtCenter } from './world.ts';
+import { canOccupy, makeWorld, landAtCenter,insideLand } from './world.ts';
 import type { World } from './world.ts';
 import { castPreview, floatPitch, limitedLook, idleFishing, carriedPosition } from './fishing.ts';
-import { createReel, stepReel, isStruggling } from './reeling.ts';
+import { createReel, stepReel, isStruggling, reelSeed } from './reeling.ts';
 import { sampleFish, FISH_SPECIES } from './fish-species.ts';
 import type { FishSpecies } from './fish-species.ts';
 import { createLiveFish, fishClearOfShop, placementPreview, stepLiveFish } from './fish-life.ts';
@@ -45,6 +46,7 @@ export class Game {
   private waitingTicks = 0;
   private biteTicks = 0;
   private chargeHeld = false;
+  private combatHeld = false;
   private reel = createReel();
   private attackCooldownTicks = 0;
   private survival = new Survival();
@@ -59,7 +61,7 @@ export class Game {
   constructor(private readonly bossPlaytest = false) {
     this.world = makeWorld('island');
     this.state = this.newState('island', 0, { x: 4, y: 1, z: -7 }, -0.3, 0);
-    this.bossSimulation = new BossSimulation(this.world); this.state.boss = this.bossSimulation.state;
+    this.bossSimulation = new BossSimulation(this.world,bossInitial(0),0,this.state.seed); this.state.boss = this.bossSimulation.state;
     this.state.gamePhase = 'paused'; this.state.ui.menu = 'pause';
     if (bossPlaytest) this.prepareBossPlaytest();
   }
@@ -74,16 +76,16 @@ export class Game {
 
   private newState(fixture: GameState['fixture'], seed: number, p: Position, yaw: number, pitch: number, fishRngState = seed || 1): GameState {
     return {
-      simulationTick: 0, gamePhase: 'running', ui: { menu: 'none' }, seed: seed || 1, fixture, fishRngState,
+      simulationTick: 0, gamePhase: 'running', ui: { menu: 'none' }, seed: seed || 1, fixture, fishRngState, directionRngState:reelSeed(seed||1),
       settings: structuredClone(this.preferences),
       deathReason: null,
-      player: { position: { ...p }, yaw, pitch, hp: 100, hunger: 100 }, coins: 0,
+      player: { position: { ...p }, yaw, pitch, hp: 100, hunger: 100, oxygen:20 }, coins: 0,
       unlockedWeapons: ['fist'], currentWeapon: 'fist',
       rareCaughtCount:0,boss:new BossSimulation(makeWorld(fixture)).state,stats:{caught:0,killed:0,sold:0,coinsEarned:0,bossDamageDealt:0},
-      mode: 'fishing',
-      fishing: idleFishing(castPreview(makeWorld(fixture), { position: p, yaw, pitch, hp: 100, hunger: 100 }, 0)),
+      mode: 'fishing',selectedSlot:0,locomotion:'ground',submerged:false,verticalInput:0,
+      fishing: Object.assign(idleFishing(castPreview(makeWorld(fixture), { position: p, yaw, pitch, hp: 100, hunger: 100, oxygen:20 }, 0)),{directionRngState:reelSeed(seed||1)}),
       fish: [], terminalFish: [], inventory: [], consumedFish: [], events: [],
-      attackCooldownRemaining: 0, attack: { sequence: 0, elapsed: .45, weaponId: 'fist', targetKind:null, hitId: null, result: 'none' },
+      attackCooldownRemaining: 0, attack: { sequence: 0, elapsed: .30, elapsedTicks:18, hand:'right', queued:false, hitCommitted:true, weaponId: 'fist', targetKind:null, hitId: null, result: 'none' },
       lastAction: { accepted: true, reason: 'reset' },
     };
   }
@@ -101,10 +103,10 @@ export class Game {
     if (this.pendingBossHit || this.state.attack.elapsed < WEAPONS[this.state.attack.weaponId].animationSeconds - 1e-9)
       throw new Error('攻击动作尚未结束，请结束动作后保存');
     const { simulationTick, gamePhase, deathReason, player, coins, unlockedWeapons, currentWeapon, rareCaughtCount,
-      boss, stats, seed, fishRngState, fixture, mode, fish, terminalFish, inventory, consumedFish, attackCooldownRemaining, attack } = this.state;
+      boss, stats, seed, fishRngState, directionRngState, fixture, mode, selectedSlot,locomotion,submerged,fish, terminalFish, inventory, consumedFish, attackCooldownRemaining, attack } = this.state;
     const state: SavedState = { simulationTick, gamePhase: this.state.ui.menu === 'settings' ? this.settingsBasePhase : ['inventory','shop'].includes(this.state.ui.menu) ? this.menuReturnPhase : gamePhase,
-      deathReason, player, coins, unlockedWeapons, currentWeapon, rareCaughtCount, boss, stats, seed, fishRngState,
-      fixture, mode, fish, terminalFish, inventory, consumedFish, attackCooldownRemaining, attack };
+      deathReason, player, coins, unlockedWeapons, currentWeapon, rareCaughtCount, boss, stats, seed, fishRngState, directionRngState,
+      fixture, mode, selectedSlot,locomotion,submerged,fish, terminalFish, inventory, consumedFish, attackCooldownRemaining, attack };
     return validateSave({ version: SAVE_VERSION, state, runtime: { velocityY: this.velocityY,
       initialFishRngState: this.initialFishRngState, nextFishId: this.nextFishId, nextCastId: this.nextCastId,
       nextEventSequence: this.nextEventSequence, reservedFishIds: [...this.reservedFishIds], attackCooldownTicks: this.attackCooldownTicks,
@@ -119,7 +121,7 @@ export class Game {
     const survival = Survival.restore(runtime.survival);
     const next = this.newState(saved.fixture, saved.seed, saved.player.position, saved.player.yaw, saved.player.pitch, saved.fishRngState);
     Object.assign(next, saved);
-    next.boss = boss.state;
+    next.boss = boss.state;next.fishing.directionRngState=saved.directionRngState;
     next.gamePhase = saved.gamePhase === 'dead' || saved.gamePhase === 'victory' ? saved.gamePhase : 'paused';
     next.ui.menu = next.gamePhase === 'paused' ? 'pause' : next.gamePhase;
     next.events = []; next.lastAction = { accepted: true, reason: 'loaded' };
@@ -145,12 +147,12 @@ export class Game {
     let p = { x: 0, y: 1, z: arena ? 3.5 : fixture==='boss-arena'?8.5:0 }; let yaw = 0; let pitch = arena ? -.6 : 0;
     let initialFish: unknown = arena ? [{ id: 'fixture-fish-1', species: 'sprat', state: 'groundedAlive', position: { x: 0, y: 1, z: 5 }, jumpTimer: 0 }] : [];
     const seed = options.seed || 1; let fishRngState = seed;
-    let hp = 100; let hunger = 100; let coins = 0; let initialInventory: unknown = [];
+    let hp = 100; let hunger = 100;let oxygen=20;let selectedSlot=0; let coins = 0; let initialInventory: unknown = [];
     let unlockedWeapons: WeaponId[] = ['fist']; let currentWeapon: WeaponId = 'fist';
     let rareCaughtCount=fixture==='boss-arena'?3:0;let initialBoss:unknown=undefined;
     if (options.initial !== undefined) {
       const initial = options.initial;
-      if (!record(initial) || !onlyKeys(initial, ['player', 'fishRngState', 'fish', 'inventory', 'coins', 'unlockedWeapons', 'currentWeapon','rareCaughtCount','boss'])) throw new TypeError('Invalid initial state');
+      if (!record(initial) || !onlyKeys(initial, ['player', 'fishRngState', 'fish', 'inventory', 'coins', 'unlockedWeapons', 'currentWeapon','selectedSlot','rareCaughtCount','boss'])) throw new TypeError('Invalid initial state');
       if(initial.rareCaughtCount!==undefined) {
         if(!finite(initial.rareCaughtCount)||!Number.isSafeInteger(initial.rareCaughtCount)||initial.rareCaughtCount<0) throw new RangeError('rareCaughtCount must be a nonnegative safe integer');
         rareCaughtCount=initial.rareCaughtCount;
@@ -166,7 +168,7 @@ export class Game {
         currentWeapon = initial.currentWeapon;
       }
       if (initial.coins !== undefined) {
-        if (!finite(initial.coins) || !Number.isInteger(initial.coins) || initial.coins < 0) throw new RangeError('Coins must be a nonnegative integer');
+        if (!finite(initial.coins) || !Number.isSafeInteger(initial.coins) || initial.coins < 0) throw new RangeError('Coins must be a nonnegative integer');
         coins = initial.coins;
       }
       if (initial.inventory !== undefined) initialInventory = initial.inventory;
@@ -178,10 +180,11 @@ export class Game {
       }
       if (initial.player !== undefined) {
         const player = initial.player;
-        if (!record(player) || !onlyKeys(player, ['position', 'yaw', 'pitch', 'hp', 'hunger'])) throw new TypeError('Invalid initial player');
+        if (!record(player) || !onlyKeys(player, ['position', 'yaw', 'pitch', 'hp', 'hunger','oxygen'])) throw new TypeError('Invalid initial player');
         for (const key of ['hp', 'hunger'] as const) {
           if (player[key] !== undefined && (!finite(player[key]) || player[key] < 0 || player[key] > 100)) throw new RangeError('Invalid player vitals');
         }
+        if(player.oxygen!==undefined){if(!finite(player.oxygen)||player.oxygen<0||player.oxygen>20)throw new RangeError('Invalid oxygen');oxygen=player.oxygen;}
         if (player.hp !== undefined) hp = player.hp as number;
         if (player.hunger !== undefined) hunger = player.hunger as number;
         if (player.position !== undefined) {
@@ -198,10 +201,14 @@ export class Game {
         }
       }
     }
+    if(record(options.initial)&&options.initial.selectedSlot!==undefined){if(!Number.isInteger(options.initial.selectedSlot)||Number(options.initial.selectedSlot)<0||Number(options.initial.selectedSlot)>8)throw new RangeError('Invalid slot');selectedSlot=options.initial.selectedSlot as number;}
+    else if(record(options.initial)&&options.initial.currentWeapon!==undefined)selectedSlot=['fist','club','spear','hammer'].indexOf(currentWeapon)+1;
+    if(selectedSlot>1&&selectedSlot<5&&!unlockedWeapons.includes(['fist','club','spear','hammer'][selectedSlot-1] as WeaponId))throw new RangeError('Locked initial slot');
+    if(selectedSlot>0&&selectedSlot<5&&currentWeapon!==['fist','club','spear','hammer'][selectedSlot-1])throw new RangeError('Inconsistent slot');
     const nextWorld = makeWorld(fixture);
-    const nextBoss = new BossSimulation(nextWorld,bossInitial(rareCaughtCount,initialBoss));
+    const nextBoss = new BossSimulation(nextWorld,bossInitial(rareCaughtCount,initialBoss),0,seed);
     // Spawning over the shop roof is outside this stage's standing surface.
-    if (p.y < 1 || !canOccupy(nextWorld, { ...p, y: 1 })) throw new RangeError('Initial position is outside legal land or inside shop');
+    if (!playerSpace(nextWorld,p)) throw new RangeError('Initial position is outside legal land or inside shop');
     if (!Array.isArray(initialFish)) throw new TypeError('initial.fish must be an array');
     const fish: Fish[] = []; const ids = new Set<string>(); let carriedCount = 0;
     for (const item of initialFish) {
@@ -229,7 +236,7 @@ export class Game {
     const nextState = this.newState(fixture, seed, p, yaw, pitch, fishRngState);
     nextState.fish = fish;
     nextState.inventory = inventory; nextState.player.hp = hp; nextState.player.hunger = hunger;
-    nextState.coins = coins;
+    nextState.coins = coins;nextState.selectedSlot=selectedSlot;nextState.mode=selectedSlot===0?'fishing':'combat';nextState.player.oxygen=oxygen;nextState.locomotion=p.y<=-1.35?'swimming':p.y===1&&insideLand(nextWorld,p)?'ground':'air';nextState.submerged=p.y+1.62<0;
     nextState.unlockedWeapons = unlockedWeapons; nextState.currentWeapon = currentWeapon;
     nextState.rareCaughtCount=rareCaughtCount;nextState.boss=nextBoss.state;
     for (const item of fish) if (item.state === 'carried') item.position = carriedPosition(nextState.player);
@@ -252,6 +259,7 @@ export class Game {
   clearInput(): void {
     this.input = { forward: 0, strafe: 0, sprint: false };
     this.chargeHeld = false; this.state.fishing.holding = false;
+    this.combatHeld=false;this.state.verticalInput=0; this.state.attack.queued=false;
   }
 
   private cancelFishing(result: FishingState['result'] = 'cancelled', keepTelemetry = false): void {
@@ -261,6 +269,7 @@ export class Game {
     this.waitingTicks = 0; this.biteTicks = 0;
     this.state.fishing = idleFishing(castPreview(this.world, this.state.player, 0));
     this.state.fishing.result = result;
+    this.state.fishing.directionRngState=this.state.directionRngState;
     if (keepTelemetry) {
       Object.assign(this.state.fishing, {
         progress: previous.progress, tension: previous.tension,
@@ -270,8 +279,8 @@ export class Game {
     }
   }
 
-  private publish(type: string, entityId: string, weaponId?: WeaponId): void {
-    this.state.events.push({ tick: this.state.simulationTick, type, entityId, sequence: this.nextEventSequence++, ...(weaponId ? {weaponId} : {}) });
+  private publish(type: string, entityId: string, weaponId?: WeaponId, position?:Position): void {
+    this.state.events.push({ tick: this.state.simulationTick, type, entityId, sequence: this.nextEventSequence++, ...(weaponId ? {weaponId} : {}), ...(position?{position:{...position}}:{}) });
     if (this.state.events.length > 200) this.state.events.splice(0, this.state.events.length - 200);
   }
 
@@ -288,7 +297,7 @@ export class Game {
 
   private escapeFish(fish: Fish): void {
     this.state.terminalFish.push({ id: fish.id, species: fish.species, state: 'escaped', position: { ...fish.position }, escapedTick: this.state.simulationTick });
-    this.publish('fish_escape', fish.id);
+    this.publish('fish_escape', fish.id, undefined, {...fish.position,y:0});
   }
 
   private removeFishInWater(): void {
@@ -309,11 +318,11 @@ export class Game {
     const fixture = this.state.fixture; const seed = this.state.seed;
     this.world = makeWorld(fixture);
     this.state = this.newState(fixture, seed, fixture === 'island' ? { x: 4, y: 1, z: -7 } : { x: 0, y: 1, z: fixture === 'fish-arena' ? 3.5 : fixture==='boss-arena'?8.5:0 }, fixture === 'island' ? -0.3 : 0, fixture === 'fish-arena' ? -.6 : 0, this.initialFishRngState);
-    this.bossSimulation=new BossSimulation(this.world);this.state.boss=this.bossSimulation.state;this.pendingBossHit=null;
+    this.bossSimulation=new BossSimulation(this.world,bossInitial(0),0,this.state.seed);this.state.boss=this.bossSimulation.state;this.pendingBossHit=null;
     this.velocityY = 0; this.chargeTicks = 0; this.waitingTicks = 0; this.biteTicks = 0;
     this.nextCastId = 1; this.reel = createReel(); this.clearInput();
     this.attackCooldownTicks = 0;
-    this.survival = new Survival(); this.menuReturnPhase = 'running'; this.state.mode = 'combat';
+    this.survival = new Survival(); this.menuReturnPhase = 'running'; this.state.mode = 'fishing';this.state.selectedSlot=0;
     this.publish('restart', 'player');
   }
 
@@ -321,6 +330,8 @@ export class Game {
     if (this.state.gamePhase === 'dead') return;
     this.state.gamePhase = 'dead'; this.state.ui.menu = 'dead'; this.state.deathReason = reason;
     this.state.attack.elapsed = WEAPONS[this.state.attack.weaponId].animationSeconds;
+    this.state.attack.elapsedTicks=WEAPONS[this.state.attack.weaponId].cooldownTicks; this.state.attack.hitCommitted=true;
+    this.attackCooldownTicks=0;this.state.attackCooldownRemaining=0;
     this.clearInput(); this.publish('game_over', 'player');
   }
 
@@ -328,6 +339,8 @@ export class Game {
     if(this.state.gamePhase==='victory') return;
     this.state.gamePhase='victory';this.state.ui.menu='victory';this.clearInput();this.publish('victory',BOSS.id);
     this.state.attack.elapsed = WEAPONS[this.state.attack.weaponId].animationSeconds;
+    this.state.attack.elapsedTicks=WEAPONS[this.state.attack.weaponId].cooldownTicks; this.state.attack.hitCommitted=true;
+    this.attackCooldownTicks=0;this.state.attackCooldownRemaining=0;
   }
 
   private openShop(): GameState['lastAction'] {
@@ -354,7 +367,9 @@ export class Game {
       this.biteTicks++; fishing.biteRemaining = Math.max(0, 60 - this.biteTicks) * STEP;
       if (this.biteTicks >= 60) this.cancelFishing('missed-bite');
     } else if (fishing.phase === 'reeling') {
-      const next = stepReel(this.reel, fishing.holding, fishing.species!); this.reel = next.state;
+      const next = stepReel(this.reel, fishing.holding, fishing.species!,fishing.rodOffset); this.reel = next.state;
+      this.state.directionRngState=this.reel.directionRngState;
+      Object.assign(fishing,{pullDirection:{...this.reel.pullDirection},counterStrength:this.reel.counterStrength,directionRngState:this.reel.directionRngState});
       fishing.progress = this.reel.progressTicks / 3; fishing.tension = this.reel.tension;
       fishing.highTensionDuration = this.reel.highTicks * STEP; fishing.lowTensionDuration = this.reel.lowTicks * STEP;
       fishing.reelElapsed = this.reel.ticks * STEP; fishing.struggling = isStruggling(this.reel.ticks);
@@ -366,11 +381,61 @@ export class Game {
         if(fish.species==='golden') {
           this.state.rareCaughtCount++;
           if(this.state.rareCaughtCount===3 && this.state.boss.state==='locked') {
-            this.bossSimulation=new BossSimulation(this.world,bossInitial(3),this.state.simulationTick);this.state.boss=this.bossSimulation.state;this.publish('boss_spawn',BOSS.id);
+            this.bossSimulation=new BossSimulation(this.world,bossInitial(3),this.state.simulationTick,this.state.seed);this.state.boss=this.bossSimulation.state;this.publish('boss_spawn',BOSS.id);
           }
         }
       } else if (next.outcome) this.cancelFishing(next.outcome, true);
     }
+  }
+
+  private startAttack(weaponId:WeaponId):void {
+    const old=this.state.attack;const weapon=WEAPONS[weaponId];
+    this.attackCooldownTicks=weapon.cooldownTicks;
+    this.state.attackCooldownRemaining=weapon.cooldownTicks*STEP;
+    this.state.attack={sequence:old.sequence+1,elapsed:0,elapsedTicks:0,
+      hand:old.hand==='left'?'right':'left',queued:false,hitCommitted:false,
+      weaponId,targetKind:null,hitId:null,result:'miss'};
+    this.publish(weaponId==='fist'?'punch':'weapon_attack','player',weaponId);
+  }
+
+  private commitAttack():void {
+    const attack=this.state.attack,weapon=WEAPONS[attack.weaponId],player=this.state.player;
+    const fish=attackTarget(player,this.state.fish,weapon),boss=this.state.boss;
+    const bossDistance=boss.state==='active'?targetDistance(player,boss.position,boss.radius,weapon.range,Infinity):null;
+    const fishDistance=fish?targetDistance(player,{...fish.position,y:fish.position.y+.2},.2,weapon.range)!:Infinity;
+    attack.hitCommitted=true;
+    if(bossDistance!==null&&bossDistance<fishDistance) {
+      attack.targetKind='boss';attack.hitId=boss.id;attack.result='hit';
+      const dealt=this.bossSimulation.damage(weapon.damage);
+      if(dealt>0) {this.state.stats.bossDamageDealt+=dealt;this.publish('boss_damage',boss.id,attack.weaponId,{...boss.position});}
+      if(boss.state==='defeated')attack.result='kill';
+    } else if(fish) {
+      const point={...fish.position,y:fish.position.y+.2};
+      attack.targetKind='fish';attack.hitId=fish.id;attack.result='hit';
+      const died=attackFish(this.world,fish,player,weapon);
+      this.publish('fish_damage',fish.id,attack.weaponId,point);
+      if(died){this.state.stats.killed++;attack.result='kill';this.publish('fish_death',fish.id);}
+    }
+    this.removeFishInWater();
+  }
+
+  private selectSlot(index:number):GameState['lastAction'] {
+    if(this.state.fish.some(f=>f.state==='carried'))return {accepted:false,reason:'carrying-fish'};
+    const weapon=(['fist','club','spear','hammer'] as const)[index-1];
+    if(weapon&&!this.state.unlockedWeapons.includes(weapon))return {accepted:false,reason:'weapon-locked'};
+    if(index!==this.state.selectedSlot){this.cancelFishing();this.state.attack.queued=false;}
+    this.state.selectedSlot=index;this.state.mode=index===0?'fishing':'combat';if(weapon)this.state.currentWeapon=weapon;
+    return {accepted:true,reason:'selectSlot'};
+  }
+
+  private stepAttack():void {
+    if(this.attackCooldownTicks===0)return;
+    const attack=this.state.attack,weapon=WEAPONS[attack.weaponId];
+    attack.elapsedTicks++;attack.elapsed=attack.elapsedTicks*STEP;
+    if(!attack.hitCommitted&&attack.elapsedTicks===weapon.hitTick)this.commitAttack();
+    this.attackCooldownTicks--;
+    this.state.attackCooldownRemaining=this.attackCooldownTicks*STEP;
+    if(this.attackCooldownTicks===0&&attack.queued&&this.state.mode==='combat'&&this.state.currentWeapon==='fist')this.startAttack('fist');
   }
 
   dispatch(action: unknown): GameState['lastAction'] {
@@ -418,19 +483,19 @@ export class Game {
         const price = WEAPONS[id].price;
         if (this.state.coins < price) return finish(false, 'insufficient-coins');
         const balance = this.state.coins - price;
-        if (!Number.isFinite(balance) || !Number.isInteger(balance) || this.state.coins - balance !== price) return finish(false, 'coin-limit');
+        if (!Number.isFinite(balance) || !Number.isSafeInteger(balance) || this.state.coins - balance !== price) return finish(false, 'coin-limit');
         this.state.coins = balance; this.state.unlockedWeapons.push(id);
         this.publish('buy', id); return finish(true, 'buy');
       }
       if (!this.state.unlockedWeapons.includes(id)) return finish(false, 'weapon-locked');
       if (this.state.gamePhase !== 'running' && !['inventory','shop'].includes(this.state.ui.menu)) return finish(false, 'paused');
-      this.state.currentWeapon = id; return finish(true, 'equip');
+      const result=this.selectSlot(['fist','club','spear','hammer'].indexOf(id)+1);return finish(result.accepted,result.accepted?'equip':result.reason);
     }
     if (action.type === 'openShop' || action.type === 'closeShop') {
       if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-shop');
       if (action.type === 'openShop') { const result = this.openShop(); return finish(result.accepted, result.reason); }
       if (this.state.ui.menu !== 'shop') return finish(false, 'shop-not-open');
-      this.state.gamePhase = this.menuReturnPhase; this.state.ui.menu = this.menuReturnPhase === 'running' ? 'none' : 'pause';
+      this.state.gamePhase='paused';this.state.ui.menu='pause';
       this.clearInput(); return finish(true, 'closeShop');
     }
     if (action.type === 'sell') {
@@ -439,27 +504,15 @@ export class Game {
       const index = this.state.inventory.findIndex(item => item.id === action.fishId);
       if (index === -1) return finish(false, 'not-in-inventory');
       const item = this.state.inventory[index]; const price = SALE_PRICES[item.species]; const balance = this.state.coins + price;
-      if (!Number.isFinite(balance) || !Number.isInteger(balance) || balance - this.state.coins !== price) return finish(false, 'coin-limit');
+      if (!Number.isFinite(balance) || !Number.isSafeInteger(balance) || balance - this.state.coins !== price) return finish(false, 'coin-limit');
       this.state.inventory.splice(index, 1); this.state.coins = balance;
       this.state.stats.sold++;this.state.stats.coinsEarned+=price;
       this.state.terminalFish.push({id:item.id, species:item.species, state:'sold', soldTick:this.state.simulationTick, price});
       this.publish('sell', item.id); return finish(true, 'sell');
     }
-    if (action.type === 'openInventory' || action.type === 'closeInventory') {
-      if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-inventory');
-      if (action.type === 'openInventory') {
-        if (this.state.ui.menu === 'settings') return finish(false,'settings-open');
-        if (this.state.ui.menu === 'shop') return finish(false, 'shop-open');
-        if (this.state.ui.menu !== 'inventory') this.menuReturnPhase = this.state.gamePhase;
-        this.state.gamePhase = 'paused'; this.state.ui.menu = 'inventory';
-      } else {
-        if (this.state.ui.menu !== 'inventory') return finish(false, 'inventory-not-open');
-        this.state.gamePhase = this.menuReturnPhase;
-        this.state.ui.menu = this.menuReturnPhase === 'running' ? 'none' : 'pause';
-      }
-      this.clearInput(); return finish(true, action.type);
-    }
+    if(['openInventory','closeInventory'].includes(action.type))return finish(false,'inventory-removed');
     if (action.type === 'eat') {
+      if(this.state.gamePhase!=='running'||this.state.ui.menu!=='none')return finish(false,'paused');
       if (!onlyKeys(action, ['type','fishId']) || typeof action.fishId !== 'string') return finish(false, 'invalid-eat');
       const index = this.state.inventory.findIndex(item => item.id === action.fishId);
       if (index === -1) return finish(false, 'not-in-inventory');
@@ -483,6 +536,15 @@ export class Game {
     }
     if (this.state.gamePhase !== 'running') return finish(false, 'paused');
     switch (action.type) {
+      case 'selectSlot':{if(!onlyKeys(action,['type','index'])||!Number.isInteger(action.index)||Number(action.index)<0||Number(action.index)>8)return finish(false,'invalid-slot');const result=this.selectSlot(action.index as number);return finish(result.accepted,result.reason);}
+      case 'cycleSlot':{if(!onlyKeys(action,['type','delta'])||(action.delta!==1&&action.delta!==-1))return finish(false,'invalid-slot');const result=this.selectSlot((this.state.selectedSlot+Number(action.delta)+9)%9);return finish(result.accepted,result.reason);}
+      case 'swim':if(!onlyKeys(action,['type','vertical'])||!direction(action.vertical))return finish(false,'invalid-swim');this.state.verticalInput=action.vertical;return finish(true,'swim');
+      case 'pull': {
+        if(!onlyKeys(action,['type','x','y'])||!finite(action.x)||!finite(action.y)||Math.hypot(action.x,action.y)>1+1e-9) return finish(false,'invalid-pull');
+        if(this.state.fishing.phase!=='reeling') return finish(false,'not-reeling');
+        this.state.fishing.rodOffset={x:action.x,y:action.y};
+        return finish(true,'pull');
+      }
       case 'interact': {
         if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-interact');
         const access = shopAccess(this.state.player);
@@ -496,6 +558,7 @@ export class Game {
           this.state.inventory.push({id:corpse.id, species:corpse.species, state:'inventoryDead'});
           this.publish('inventory', corpse.id); return finish(true, 'pickup-corpse');
         }
+        if(this.state.locomotion==='swimming')return finish(false,'in-water');
         const target = placementPreview(this.world, this.state.player);
         if (!target.valid) return finish(false, target.reason);
         Object.assign(fish, createLiveFish({ id: fish.id, species: fish.species, state: 'groundedAlive', position: target.position, jumpTimer: 0, hp: fish.hp }));
@@ -504,7 +567,7 @@ export class Game {
       case 'move':
         if (!onlyKeys(action, ['type', 'forward', 'strafe', 'sprint']) || !direction(action.forward) ||
           !direction(action.strafe) || typeof action.sprint !== 'boolean') return finish(false, 'invalid-move');
-        if (this.state.fishing.phase !== 'idle') { this.input = { forward: 0, strafe: 0, sprint: false }; return finish(false, 'fishing-locked'); }
+        if (!['idle','charging'].includes(this.state.fishing.phase)) { this.input = { forward: 0, strafe: 0, sprint: false }; return finish(false, 'fishing-locked'); }
         this.input = { forward: action.forward, strafe: action.strafe, sprint: action.sprint };
         return finish(true, 'move');
       case 'look':
@@ -520,47 +583,43 @@ export class Game {
       case 'jump':
         if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-jump');
         if (this.state.fishing.phase !== 'idle') return finish(false, 'fishing-locked');
+        if (this.state.locomotion==='swimming'){this.state.verticalInput=1;return finish(true,'swim');}
         if (this.state.player.position.y !== this.world.surface || this.velocityY !== 0) return finish(false, 'airborne');
-        this.velocityY = PHYSICS.jump; return finish(true, 'jump');
+        this.velocityY = PHYSICS.jump;this.state.locomotion='air'; return finish(true, 'jump');
       case 'setMode':
         if (!onlyKeys(action, ['type', 'mode']) || (action.mode !== 'fishing' && action.mode !== 'combat')) return finish(false, 'invalid-mode');
         if (action.mode === this.state.mode) return finish(true, 'mode-unchanged');
-        this.cancelFishing();
-        this.state.mode = action.mode;
+        const selected=this.selectSlot(action.mode==='fishing'?0:['fist','club','spear','hammer'].indexOf(this.state.currentWeapon)+1);
+        if(!selected.accepted)return finish(false,selected.reason);
         return finish(true, 'setMode');
       case 'cancelFishing':
         if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-cancel');
         this.cancelFishing(); return finish(true, 'cancelFishing');
       case 'primaryDown':
         if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-primary');
+        if(this.state.selectedSlot>=5){if(this.combatHeld)return finish(false,'primary-held');this.combatHeld=true;const species=(['sprat','bass','tuna','golden'] as const)[this.state.selectedSlot-5],item=this.state.inventory.find(f=>f.species===species);return item?this.dispatch({type:'eat',fishId:item.id}):finish(false,'empty-slot');}
         if (this.state.mode === 'combat') {
-          if (this.attackCooldownTicks > 0) return finish(false, 'attack-cooldown');
-          const weaponId = this.state.currentWeapon; const weapon = WEAPONS[weaponId];
-          const fishTarget = attackTarget(this.state.player, this.state.fish, weapon);
-          const boss = this.state.boss;
-          const bossDistance = boss.state==='active' ? targetDistance(this.state.player,boss.position,boss.radius,weapon.range,Infinity) : null;
-          const fishDistance = fishTarget ? targetDistance(this.state.player,{...fishTarget.position,y:fishTarget.position.y+.2},.2,weapon.range)! : Infinity;
-          const hitBoss = bossDistance!==null && bossDistance<fishDistance;
-          const target = hitBoss ? null : fishTarget;
-          const hitId = hitBoss ? boss.id : target?.id ?? null;
-          this.attackCooldownTicks = weapon.cooldownTicks; this.state.attackCooldownRemaining = weapon.cooldownTicks * STEP;
-          this.state.attack = { sequence: this.state.attack.sequence + 1, elapsed: 0, weaponId, targetKind:hitBoss?'boss':target?'fish':null, hitId, result: hitId ? 'hit' : 'miss' };
-          this.publish(weaponId === 'fist' ? 'punch' : 'weapon_attack', hitId ?? 'player', weaponId);
-          if(hitBoss) this.pendingBossHit={damage:weapon.damage,weaponId};
-          if (target) {
-            const died = attackFish(this.world, target, this.state.player, weapon); this.publish('fish_damage', target.id, weaponId);
-            if (died) { this.state.stats.killed++;this.publish('fish_death', target.id); this.state.attack.result = 'kill'; }
+          if(this.combatHeld) return finish(false,'primary-held');
+          this.combatHeld=true;
+          if(this.attackCooldownTicks>0) {
+            const attack=this.state.attack;
+            if(this.state.currentWeapon==='fist'&&attack.weaponId==='fist'&&!attack.queued) {
+              attack.queued=true;this.combatHeld=true;return finish(true,'punch-queued');
+            }
+            return finish(false,'attack-cooldown');
           }
-          // Attack/death commit before any fish displacement/escape simulation.
-          this.removeFishInWater();
-          return finish(true, hitBoss ? 'boss-hit' : target ? weaponId === 'fist' ? 'punch-hit' : 'attack-hit' : weaponId === 'fist' ? 'punch-miss' : 'attack-miss');
+          this.combatHeld=true;this.startAttack(this.state.currentWeapon);
+          return finish(true,'attack-started');
         }
+        if(this.attackCooldownTicks>0)return finish(false,'attack-active');
         if (this.state.fish.some(fish => fish.state === 'carried')) return finish(false, 'carrying-fish');
         if (this.state.fishing.phase === 'bite' || this.state.fishing.phase === 'reeling') {
           if (this.state.fishing.phase === 'bite') {
             const draw = sampleFish(this.state.fishRngState);
             this.state.fishRngState = draw.state; this.state.fishing.species = draw.species;
-            this.reel = createReel(); this.state.fishing.phase = 'reeling'; this.state.fishing.biteRemaining = 0;
+            this.reel = createReel(this.state.directionRngState); this.state.directionRngState=this.reel.directionRngState;
+            Object.assign(this.state.fishing,{pullDirection:{...this.reel.pullDirection},rodOffset:{x:0,y:0},counterStrength:0,directionRngState:this.reel.directionRngState});
+            this.state.fishing.phase = 'reeling'; this.state.fishing.biteRemaining = 0;
             this.state.fishing.progress = 0; this.state.fishing.tension = 40;
             this.publish('hooked', `cast-${this.state.fishing.cast!.id}`);
           }
@@ -572,13 +631,14 @@ export class Game {
         }
         if (this.state.fishing.phase !== 'idle') return finish(false, 'fishing-active');
         if (this.state.player.position.y !== this.world.surface || this.velocityY !== 0) return finish(false, 'not-grounded');
-        this.cancelFishing(null); this.chargeTicks = 0; this.chargeHeld = true;
+        const walking={...this.input};this.cancelFishing(null);this.input=walking; this.chargeTicks = 0; this.chargeHeld = true;
         this.state.fishing.phase = 'charging'; this.state.fishing.chargeSeconds = 0;
         this.state.fishing.holding = true;
         this.state.fishing.preview = castPreview(this.world, this.state.player, 0);
         return finish(true, 'primaryDown');
       case 'primaryUp': {
         if (!onlyKeys(action, ['type'])) return finish(false, 'invalid-primary');
+        this.combatHeld=false;
         if (this.state.mode === 'combat') return finish(true, 'primaryUp');
         if (this.state.fishing.phase === 'reeling') {
           this.state.fishing.holding = false; return finish(true, 'primaryUp');
@@ -591,6 +651,7 @@ export class Game {
           id: this.nextCastId++, origin: { ...player.position }, position: { ...preview.position },
           distance: preview.distance, yaw: player.yaw, pitch: floatPitch(player, preview.distance),
         };
+        this.state.fishing.lastCastTick=this.state.simulationTick;
         this.state.fishing.phase = 'waiting'; this.state.fishing.preview = preview; this.state.fishing.cast = cast;
         this.waitingTicks = 0; this.biteTicks = 0;
         this.publish('cast', `cast-${cast.id}`);
@@ -609,49 +670,24 @@ export class Game {
   step(): void {
     if (this.state.gamePhase !== 'running') return;
     this.state.simulationTick++;
-    if(this.pendingBossHit) {
-      const hit=this.pendingBossHit;this.pendingBossHit=null;const dealt=this.bossSimulation.damage(hit.damage);
-      if(dealt>0) { this.state.stats.bossDamageDealt+=dealt;this.publish('boss_damage',BOSS.id,hit.weaponId); }
-      if(this.state.boss.state==='defeated') this.state.attack.result='kill';
-    }
-    this.attackCooldownTicks = Math.max(0, this.attackCooldownTicks - 1);
-    this.state.attackCooldownRemaining = this.attackCooldownTicks * STEP;
-    this.state.attack.elapsed = Math.min(WEAPONS[this.state.attack.weaponId].animationSeconds, this.state.attack.elapsed + STEP);
+    this.stepAttack();
     const player = this.state.player;
     if (this.state.fishing.phase === 'charging' && this.chargeHeld) {
       this.chargeTicks = Math.min(60, this.chargeTicks + 1);
       this.state.fishing.chargeSeconds = this.chargeTicks * STEP;
     }
-    const magnitude = Math.hypot(this.input.forward, this.input.strafe) || 1;
-    const forward = this.input.forward / magnitude;
-    const strafe = this.input.strafe / magnitude;
-    const speed = this.input.sprint ? PHYSICS.sprint : PHYSICS.walk;
-    const sin = Math.sin(player.yaw); const cos = Math.cos(player.yaw);
-    if (this.state.fishing.phase === 'idle')
-      player.position = moveHorizontal(this.world, player.position,
-        (forward * sin + strafe * cos) * speed * STEP,
-        (forward * cos - strafe * sin) * speed * STEP);
-    if (this.velocityY !== 0 || player.position.y > this.world.surface) {
-      const nextY = player.position.y + this.velocityY * STEP - 0.5 * PHYSICS.gravity * STEP * STEP;
-      this.velocityY -= PHYSICS.gravity * STEP;
-      // Respect the building's height when an initial airborne player descends.
-      if (this.velocityY < 0 && nextY < SHOP.bottom + SHOP.height &&
-        player.position.y >= SHOP.bottom + SHOP.height &&
-        !canOccupy(this.world, { ...player.position, y: SHOP.bottom })) {
-        player.position.y = SHOP.bottom + SHOP.height;
-        this.velocityY = 0;
-      } else if (nextY <= this.world.surface) {
-        player.position.y = this.world.surface; this.velocityY = 0;
-      } else player.position.y = nextY;
-    }
+    this.velocityY=stepLocomotion(this.world,this.state,this.input,this.velocityY);
+    if(!canOccupy(this.world,{...player.position,y:1})&&this.state.fishing.phase!=='idle')this.cancelFishing();
     this.stepFishing(); this.stepFishLife(); this.syncCarriedFish();
     const previousHp = player.hp;let bossKilledPlayer=false;
     this.bossSimulation.step(this.state.simulationTick,player,amount=>{
       this.survival.damage(player,amount);if(player.hp===0) bossKilledPlayer=true;
     });
-    this.survival.step(player);
+    const drowned=this.state.submerged&&player.oxygen<=1e-9;
+    player.oxygen=Math.max(0,Math.min(20,player.oxygen+(this.state.submerged?-1:4)*STEP));
+    this.survival.step(player);if(drowned)this.survival.damage(player,10*STEP);
     if (player.hp < previousHp) this.publish('player_damage', 'player');
-    if (player.hp === 0) this.die(bossKilledPlayer?'boss':'starvation');
+    if (player.hp === 0) this.die(drowned?'drowning':bossKilledPlayer?'boss':'starvation');
     else if(this.state.boss.state==='defeated') this.win();
     if (this.state.fishing.phase === 'idle' || this.state.fishing.phase === 'charging')
       this.state.fishing.preview = castPreview(this.world, player, this.state.fishing.chargeSeconds);

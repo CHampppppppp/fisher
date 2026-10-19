@@ -1,18 +1,19 @@
+import {playerSpace,overlapsIsland} from './locomotion.ts';
 import type { GameState, Position } from './types.ts';
 import { STEP } from './types.ts';
 import { WEAPONS, isWeaponId } from './weapons.ts';
 import { FISH_SPECIES } from './fish-species.ts';
 import { fishClearOfShop } from './fish-life.ts';
 import { carriedPosition } from './fishing.ts';
-import { canOccupy, landAtCenter, makeWorld } from './world.ts';
-import { bossInitial, BOSS, type BossSimulation } from './boss.ts';
+import { landAtCenter, makeWorld,SHOP } from './world.ts';
+import { bossInitial, bossPathClear, BOSS, type BossSimulation } from './boss.ts';
 import { INVENTORY_CAPACITY, type Survival } from './survival.ts';
 import { SALE_PRICES } from './shop.ts';
 
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
 export type SavedState = Pick<GameState, 'simulationTick' | 'gamePhase' | 'deathReason' | 'player' | 'coins' |
   'unlockedWeapons' | 'currentWeapon' | 'rareCaughtCount' | 'boss' | 'stats' | 'seed' | 'fishRngState' | 'fixture' |
-  'mode' | 'fish' | 'terminalFish' | 'inventory' | 'consumedFish' | 'attackCooldownRemaining' | 'attack'>;
+  'directionRngState' | 'selectedSlot' | 'locomotion' | 'submerged' | 'mode' | 'fish' | 'terminalFish' | 'inventory' | 'consumedFish' | 'attackCooldownRemaining' | 'attack'>;
 export interface SaveFile {
   version: typeof SAVE_VERSION;
   state: SavedState;
@@ -55,25 +56,31 @@ function ticksMatch(seconds: unknown, ticks: number, label: string): void {
 /** All inputs pass the same complete validator before any game or IndexedDB mutation. */
 export function validateSave(value: unknown): SaveFile {
   const root = object(value, ['version','state','runtime'], 'document');
-  if(root.version!==SAVE_VERSION) throw new TypeError('Unsupported save version');
+  if(root.version!==SAVE_VERSION) throw new TypeError('不支持的存档版本；新版仅支持version2，旧档未改变');
   const s = object(root.state, ['simulationTick','gamePhase','deathReason','player','coins','unlockedWeapons','currentWeapon',
-    'rareCaughtCount','boss','stats','seed','fishRngState','fixture','mode','fish','terminalFish','inventory','consumedFish','attackCooldownRemaining','attack'], 'state');
+    'rareCaughtCount','boss','stats','seed','fishRngState','fixture','directionRngState','selectedSlot','locomotion','submerged','mode','fish','terminalFish','inventory','consumedFish','attackCooldownRemaining','attack'], 'state');
   const r = object(root.runtime, ['velocityY','initialFishRngState','nextFishId','nextCastId','nextEventSequence','reservedFishIds','attackCooldownTicks','survival','boss'], 'runtime');
   const tick = integer(s.simulationTick,'simulationTick');
   enumValue(s.fixture,['island','shore','fish-arena','boss-arena'],'fixture');
   const world = makeWorld(s.fixture as GameState['fixture']);
-  integer(s.seed,'seed',1,0xffffffff); integer(s.fishRngState,'fishRngState',1,0xffffffff);
+  integer(s.directionRngState,'directionRngState',1,0xffffffff);integer(s.seed,'seed',1,0xffffffff); integer(s.fishRngState,'fishRngState',1,0xffffffff);
   enumValue(s.gamePhase,['running','paused','dead','victory'],'gamePhase'); enumValue(s.mode,['fishing','combat'],'mode');
-  enumValue(s.deathReason,[null,'starvation','boss'],'deathReason');
-  const p = object(s.player,['position','yaw','pitch','hp','hunger'],'player'); const pp=position(p.position,'player.position');
+  enumValue(s.deathReason,[null,'starvation','boss','drowning'],'deathReason');
+  const p = object(s.player,['position','yaw','pitch','hp','hunger','oxygen'],'player'); const pp=position(p.position,'player.position');
   number(p.yaw,'yaw');number(p.pitch,'pitch',-1.4,1.4);number(p.hp,'hp',0,100);number(p.hunger,'hunger',0,100);
-  if(pp.y<1 || !canOccupy(world,{...pp,y:1})) fail('player legal land');
-  // Coins already supported integers beyond MAX_SAFE_INTEGER; only exact transactions are accepted by production.
-  if(!Number.isInteger(number(s.coins,'coins',0))) fail('coins');
+  if(!playerSpace(world,pp))fail('player space');number(p.oxygen,'oxygen',0,20);
+  enumValue(s.locomotion,['ground','air','swimming'],'locomotion');boolean(s.submerged,'submerged');
+  if(s.submerged!==(pp.y+1.62<0)||(s.locomotion==='swimming'&&(pp.y> -1.35||pp.y< -8))||(s.locomotion==='ground'&&pp.y<1)||(s.locomotion==='air'&&pp.y<= -1.35))fail('water state');
+  if(!Number.isSafeInteger(number(s.coins,'coins',0))) fail('coins');
   const weapons=list(s.unlockedWeapons,'weapons',4);if(!weapons.every(isWeaponId)||new Set(weapons).size!==weapons.length||!weapons.includes('fist')||!isWeaponId(s.currentWeapon)||!weapons.includes(s.currentWeapon)) fail('equipped unlock');
+  const slot=integer(s.selectedSlot,'selectedSlot',0,8);
+  if((s.mode==='fishing')!==(slot===0)||(slot>0&&slot<5&&s.currentWeapon!==['fist','club','spear','hammer'][slot-1]))fail('selection mode');
   const rare=integer(s.rareCaughtCount,'rareCaughtCount');
   const stats=object(s.stats,['caught','killed','sold','coinsEarned','bossDamageDealt'],'stats');for(const [key,value] of Object.entries(stats)) { if(key==='bossDamageDealt') number(value,`stats.${key}`,0,600); else integer(value,`stats.${key}`); }
-  number(r.velocityY,'velocityY');integer(r.initialFishRngState,'initialFishRngState',1,0xffffffff);
+  const velocity=number(r.velocityY,'velocityY');
+  if(s.locomotion==='swimming'&&velocity!==0)fail('swimming velocity');
+  if(s.locomotion==='ground'){const land=overlapsIsland(world,pp)&&Math.abs(pp.y-1)<1e-8;const roof=Math.abs(pp.y-SHOP.bottom-SHOP.height)<1e-8&&Math.abs(pp.x-SHOP.x)<=SHOP.halfWidth&&Math.abs(pp.z-SHOP.z)<=SHOP.halfDepth;if((!land&&!roof)||velocity!==0)fail('ground support');}
+  integer(r.initialFishRngState,'initialFishRngState',1,0xffffffff);
   integer(r.nextFishId,'nextFishId',1);integer(r.nextCastId,'nextCastId',1);integer(r.nextEventSequence,'nextEventSequence',1);
   const reserved=list(r.reservedFishIds,'reservedFishIds').map(id=>string(id,'reserved ID'));const reservedIds=new Set(reserved);if(reservedIds.size!==reserved.length) fail('reserved duplicate');
   const ids=new Set<string>();
@@ -117,21 +124,32 @@ export function validateSave(value: unknown): SaveFile {
     if(kind==='escaped'){position(f.position,'escaped.position');integer(f.escapedTick,'escapedTick',0,tick);}
     else { integer(f.soldTick,'soldTick',0,tick);if(f.price!==SALE_PRICES[f.species as keyof typeof SALE_PRICES]) fail('sale price'); }
   }
-  const a=object(s.attack,['sequence','elapsed','weaponId','targetKind','hitId','result'],'attack');integer(a.sequence,'attack.sequence');
+  const a=object(s.attack,['sequence','elapsed','elapsedTicks','hand','queued','hitCommitted','weaponId','targetKind','hitId','result'],'attack');integer(a.sequence,'attack.sequence');
   if(!isWeaponId(a.weaponId)||!weapons.includes(a.weaponId)) fail('attack weapon');near(number(a.elapsed,'attack.elapsed'),WEAPONS[a.weaponId].animationSeconds,'unfinished animation');
+  enumValue(a.hand,['left','right'],'attack hand');if(a.queued!==false||a.hitCommitted!==true)fail('unfinished attack');
+  near(integer(a.elapsedTicks,'elapsed ticks',0),WEAPONS[a.weaponId].cooldownTicks,'attack tick clock');
   enumValue(a.targetKind,[null,'fish','boss'],'targetKind');enumValue(a.result,['none','miss','hit','kill'],'attack.result');
   if(a.hitId!==null && typeof a.hitId!=='string') fail('hitId');
   if((a.targetKind===null)!==(a.hitId===null) || (a.targetKind==='boss'&&a.hitId!==BOSS.id)) fail('attack target');
   if((a.targetKind==='fish' && !reservedIds.has(a.hitId as string)) ||
     (a.targetKind===null ? !['none','miss'].includes(a.result as string) : !['hit','kill'].includes(a.result as string))) fail('attack result');
-  const cd=integer(r.attackCooldownTicks,'cooldownTicks',0,WEAPONS[a.weaponId].cooldownTicks);near(number(s.attackCooldownRemaining,'cooldown',0),cd*STEP,'cooldown clock');
+  const cd=integer(r.attackCooldownTicks,'cooldownTicks',0,0);near(number(s.attackCooldownRemaining,'cooldown',0),cd*STEP,'cooldown clock');
   const survival=object(r.survival,['hpBase','hungerBase','hungerTicks','damageTicks'],'survival');
   const baseHp=number(survival.hpBase,'hpBase',0,100);const baseHunger=number(survival.hungerBase,'hungerBase',0,100);
   const hungerTicks=integer(survival.hungerTicks,'hungerTicks',0,tick);const damageTicks=integer(survival.damageTicks,'damageTicks',0,tick);
-  near(number(p.hp,'hp'),Math.max(0,baseHp-damageTicks/30),'HP baseline');near(number(p.hunger,'hunger'),Math.max(0,baseHunger-hungerTicks/120),'hunger baseline');
-  const b=object(s.boss,['state','hp','tentacleRemaining','inkRemaining','id','position','radius','phase','attacks'],'boss');
+  near(number(p.hp,'hp'),Math.max(0,baseHp-damageTicks/30),'HP baseline');near(number(p.hunger,'hunger'),Math.max(0,baseHunger-hungerTicks/600),'hunger baseline');
+  const b=object(s.boss,['state','hp','tentacleRemaining','inkRemaining','id','position','radius','phase','attacks','jumpPhase','jumpTicks','start','target','cooldownTicks','contactProtectionTicks','bossRngState'],'boss');
   bossInitial(rare,{state:b.state,hp:b.hp,tentacleRemaining:b.tentacleRemaining,inkRemaining:b.inkRemaining});
-  if(b.id!==BOSS.id||b.radius!==BOSS.radius) fail('boss identity');const bp=position(b.position,'boss.position');near(bp.x,0,'boss.x');near(bp.y,1,'boss.y');near(bp.z,(world.coast.kind==='square'?world.coast.halfSize:world.coast.radius)+2,'boss.z');
+  if(b.id!==BOSS.id||b.radius!==BOSS.radius) fail('boss identity');const bp=position(b.position,'boss.position');
+  const start=position(b.start,'boss start'),target=position(b.target,'boss target');
+  integer(b.bossRngState,'boss rng',1,0xffffffff);integer(b.contactProtectionTicks,'boss protection',0,60);
+  enumValue(b.jumpPhase,['cooldown','warning','jumping'],'boss jumpPhase');const jt=integer(b.jumpTicks,'boss jumpTicks',0,45),cooldown=integer(b.cooldownTicks,'boss cooldown',0,90);
+  for(const point of [bp,start,target])if(Math.hypot(point.x,point.z)>64||point.y<1||point.y>6)fail('boss jump bounds');
+  if(b.jumpPhase==='cooldown'){if(jt!==0||cooldown<1)fail('boss cooldown phase');near(bp.y,landAtCenter(world,bp)?3:1,'boss grounded height');}
+  else if(b.jumpPhase==='warning'){if(jt<1||jt>30||cooldown!==0)fail('boss warning clock');near(bp.x,start.x,'boss warning x');near(bp.y,start.y,'boss warning y');near(bp.z,start.z,'boss warning z');}
+  else {if(jt<1||cooldown!==0)fail('boss flight clock');const t=(45-jt)/45;near(bp.x,start.x+(target.x-start.x)*t,'boss jump x');near(bp.z,start.z+(target.z-start.z)*t,'boss jump z');near(bp.y,start.y+(target.y-start.y)*t+3*Math.sin(Math.PI*t),'boss jump y');}
+  near(target.y,landAtCenter(world,target)?3:1,'boss target height');
+  if(!bossPathClear(start,target)||!bossPathClear(bp,bp)||Math.hypot(target.x-start.x,target.z-start.z)>Math.sqrt(37)+1e-8)fail('boss jump path');
   if(b.phase!==(b.state==='locked'||number(b.hp,'boss.hp')>300?1:2)) fail('boss phase');
   if((s.gamePhase==='dead')!==(p.hp===0) || (s.gamePhase==='dead')!==(s.deathReason!==null) ||
     (s.gamePhase==='victory' && b.state!=='defeated') || (b.state==='defeated' && !['dead','victory'].includes(s.gamePhase as string))) fail('terminal state');

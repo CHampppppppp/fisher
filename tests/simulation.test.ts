@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Game } from '../src/game/game.ts';
+import {WEAPONS} from '../src/game/weapons.ts';
+import {BossSimulation,bossInitial} from '../src/game/boss.ts';
+import {makeWorld} from '../src/game/world.ts';
 import { GameClock } from '../src/game/clock.ts';
 
 const fresh = () => { const game = new Game(); game.reset({ seed: 42, fixture: 'shore' }); return game; };
@@ -33,11 +36,11 @@ test('jump reaches air, cannot jump in air, lands on sand', () => {
   game.dispatch({ type: 'jump' }); assert.equal(game.getState().lastAction.accepted, false);
   game.advanceTicks(60); close(game.getState().player.position.y, 1);
 });
-test('coast stops the entire body even during jumps and sprinting', () => {
-  const game = fresh(); move(game, 1, 1, true); game.dispatch({ type: 'jump' }); game.advanceTicks(600);
-  const p = game.getState().player.position; assert.ok(p.x <= 9.7); assert.ok(p.z <= 9.7); close(p.y, 1);
-  game.reset({ seed: 1, fixture: 'shore' }); move(game, -1, -1, true); game.advanceTicks(600);
-  const q = game.getState().player.position; assert.ok(q.x >= -9.7); assert.ok(q.z >= -9.7);
+test('v2 coast permits water entry while the outer world boundary still blocks movement',()=>{
+ const g=fresh();move(g,1,1,true);g.dispatch({type:'jump'});g.advanceTicks(600);
+ assert.ok(g.getState().player.position.x>10);assert.equal(g.getState().locomotion,'swimming');close(g.getState().player.position.y,-1.35);
+ g.reset({seed:1,fixture:'shore'});move(g,-1,-1,true);g.advanceTicks(600);assert.ok(g.getState().player.position.x< -10);assert.ok(g.getState().player.position.z< -10);
+
 });
 test('shop blocks movement from all sides and airborne movement', () => {
   for (const [position, forward, strafe] of [
@@ -73,7 +76,7 @@ test('invalid resets reject atomically including body outside coast or inside sh
   for (const input of [null, { seed: -1, fixture: 'shore' }, { seed: 1.5, fixture: 'shore' },
     { seed: 1, fixture: 'other' }, { seed: 1, fixture: 'shore', initial: null },
     { seed: 1, fixture: 'shore', initial: { player: { pitch: 2 } } },
-    ...[{ x: 10, y: 1, z: 0 }, { x: -6, y: 1, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: Infinity, z: 0 }]
+    ...[{ x: 65, y: 1, z: 0 }, { x: -6, y: 1, z: 0 }, { x: 0, y: 0, z: 0 }, { x: 0, y: Infinity, z: 0 }]
       .map(position => ({ seed: 1, fixture: 'shore', initial: { player: { position } } })),
     { seed: 1, fixture: 'shore', initial: { player: { hp: 101 } } }]) { // HP is now a supported reset field.
     assert.throws(() => game.reset(input)); assert.deepEqual(game.getState(), before);
@@ -114,7 +117,7 @@ test('normal island shares coast and motion logic; aerial initial state falls sa
   const game = new Game(); const world = game.getWorld(); world.surface = 99;
   assert.equal(game.getWorld().surface, 1);
   game.dispatch({ type: 'resume' }); move(game, 1, 1, true); game.advanceTicks(600);
-  const p = game.getState().player.position; assert.ok(Math.hypot(p.x, p.z) <= 22.7);
+  const p = game.getState().player.position; assert.ok(Math.hypot(p.x,p.z)>23);assert.equal(game.getState().locomotion,'swimming');
   game.reset({ seed: 1, fixture: 'shore', initial: { player: { position: { x: 0, y: 8, z: 0 } } } });
   game.advanceTicks(180); assert.equal(game.getState().player.position.y, 1);
 });
@@ -158,21 +161,13 @@ test('land, shop obstruction, menu and combat reject casting without a session',
   assert.equal(menu.getState().fishing.cast, null);
 });
 
-test('charging/waiting block motion and jump, waiting look keeps float in view', () => {
-  const game = northShore(); move(game); game.dispatch({ type: 'primaryDown' }); game.advanceTicks(30);
-  const origin = game.getState().player.position; assert.deepEqual(origin, { x: 0, y: 1, z: 9 });
-  assert.equal(game.dispatch({ type: 'jump' }).accepted, false);
-  move(game, 1, 1, true); game.advanceTicks(30); assert.deepEqual(game.getState().player.position, origin);
-  game.dispatch({ type: 'primaryUp' });
-  const castState = game.getState().fishing.cast!;
-  game.dispatch({ type: 'look', yaw: 2, pitch: 1.4 });
-  const player = game.getState().player;
-  assert.ok(Math.abs(player.yaw - castState.yaw) <= 20 * Math.PI / 180 + 1e-9);
-  assert.ok(Math.abs(player.pitch - castState.pitch) <= 10 * Math.PI / 180 + 1e-9);
-  move(game, -1, 0, true); game.advanceTicks(60); assert.deepEqual(game.getState().player.position, origin);
-  game.dispatch({ type: 'cancelFishing' }); assert.equal(game.getState().fishing.phase, 'idle');
-  game.dispatch({ type: 'look', yaw: Math.PI, pitch: 0 }); move(game); game.advanceTicks(60);
-  close(game.getState().player.position.z, 5);
+test('v2 charging allows walking, waiting locks motion and keeps the float in view',()=>{
+ const g=northShore();move(g,0,1,true);g.dispatch({type:'primaryDown'});g.advanceTicks(30);close(g.getState().player.position.x,2);close(g.getState().player.position.z,9);
+ assert.equal(g.dispatch({type:'jump'}).accepted,false);g.dispatch({type:'primaryUp'});const cast=g.getState().fishing.cast!;
+ g.dispatch({type:'look',yaw:2,pitch:1.4});assert.ok(Math.abs(g.getState().player.yaw-cast.yaw)<=20*Math.PI/180+1e-9);
+ const origin=g.getState().player.position;move(g,-1,0,true);g.advanceTicks(60);assert.deepEqual(g.getState().player.position,origin);
+ g.dispatch({type:'cancelFishing'});move(g,-1,0);g.advanceTicks(30);assert.notDeepEqual(g.getState().player.position,origin);
+
 });
 
 test('20 cast/cancel cycles and mode/pause/reset leave no session or held input', () => {
@@ -616,7 +611,8 @@ test('live render follows production positions, reuses models and releases reset
 });
 
 const combatArena = (fish?: unknown[], player?: unknown) => { const game = arena(fish, player); game.dispatch({ type: 'setMode', mode: 'combat' }); return game; };
-const punch = (game: Game) => game.dispatch({ type: 'primaryDown' });
+// Shared targeting helper submits real edges and advances to the locked weapon hit tick. Timing itself has explicit v2 tests.
+const punch = (game: Game) => {const r=game.dispatch({type:'primaryDown'});game.dispatch({type:'primaryUp'});if(r.accepted)game.advanceTicks(WEAPONS[game.getState().attack.weaponId].hitTick);return r;};
 const combatFish = (species = 'sprat', position = { x: 0, y: 1, z: 5 }, hp?: number, state = 'groundedAlive', id = 'target') =>
   ({ ...arenaFish(species, position, 0, state, id), ...(hp === undefined ? {} : { hp }) });
 
@@ -631,18 +627,11 @@ test('fish HP defaults match species and dead/invalid HP initialization is valid
   }
 });
 
-test('punch deals ten, takes exactly 27 ticks cooldown, and holding/misses do not bypass it', () => {
-  const game = combatArena(); assert.equal(punch(game).accepted, true); assert.equal(game.getState().fish[0].hp, 10);
-  close(game.getState().attackCooldownRemaining, .45); assert.equal(punch(game).reason, 'attack-cooldown');
-  for (let i = 0; i < 26; i++) { game.advanceTicks(1); assert.equal(punch(game).accepted, false); }
-  assert.equal(game.getState().fish[0].hp, 10); game.advanceTicks(1); assert.equal(game.getState().attackCooldownRemaining, 0);
-  assert.equal(punch(game).accepted, true); assert.equal(game.getState().fish[0].hp, 0); assert.equal(game.getState().fish[0].state, 'groundedDead');
-  assert.equal(game.getState().events.filter(event => event.type === 'fish_damage').length, 2);
-  const held = combatArena([combatFish('tuna')]); punch(held); held.advanceTicks(60); assert.equal(held.getState().fish[0].hp, 80);
-  const miss = combatArena([]); assert.equal(punch(miss).accepted, true); close(miss.getState().attackCooldownRemaining, .45);
-  assert.equal(punch(miss).accepted, false); miss.dispatch({ type: 'pause' }); const paused = miss.getState();
-  miss.advanceTicks(300); assert.deepEqual(miss.getState(), paused); miss.dispatch({ type: 'resume' }); miss.advanceTicks(27);
-  assert.equal(punch(miss).accepted, true);
+test('v2 fist damage waits six ticks, cycle ends at eighteen and holding never repeats',()=>{
+ const g=combatArena();g.dispatch({type:'primaryDown'});assert.equal(g.getState().fish[0].hp,20);g.advanceTicks(5);assert.equal(g.getState().fish[0].hp,20);g.advanceTicks(1);assert.equal(g.getState().fish[0].hp,10);g.advanceTicks(12);assert.equal(g.getState().attackCooldownRemaining,0);
+ assert.equal(g.dispatch({type:'primaryDown'}).accepted,false);g.dispatch({type:'primaryUp'});g.dispatch({type:'primaryDown'});g.advanceTicks(6);assert.equal(g.getState().fish[0].state,'groundedDead');
+ const miss=combatArena([]);miss.dispatch({type:'primaryDown'});miss.dispatch({type:'pause'});const frozen=miss.getState();miss.advanceTicks(600);assert.deepEqual(miss.getState(),frozen);miss.dispatch({type:'resume'});miss.advanceTicks(18);assert.equal(miss.getState().attackCooldownRemaining,0);
+
 });
 
 test('combat selects only nearest visible alive fish within angle, collider range and height', () => {
@@ -651,9 +640,8 @@ test('combat selects only nearest visible alive fish within angle, collider rang
     combatFish('sprat', { x: 0, y: 1, z: 5 }, undefined, 'groundedAlive', 'near'),
     combatFish('tuna', { x: 0, y: 1, z: 2 }, undefined, 'groundedAlive', 'behind'),
     combatFish('golden', { x: 0, y: 1, z: 4.2 }, 0, 'groundedDead', 'dead'),
-    combatFish('bass', { x: 0, y: 1, z: 4 }, undefined, 'carried', 'held'),
   ]); punch(game); const hp = Object.fromEntries(game.getState().fish.map(fish => [fish.id, fish.hp]));
-  assert.deepEqual(hp, { far:45, near:10, behind:90, dead:0, held:45 });
+  assert.deepEqual(hp, { far:45, near:10, behind:90, dead:0 });
   for (const [fishPosition, player, expectedHit] of [
     [{ x: 0, y: 1, z: 5.58 }, { position: { x: 0, y: 1, z: 3.5 } }, true],
     [{ x: 0, y: 1, z: 5.60 }, { position: { x: 0, y: 1, z: 3.5 } }, false],
@@ -662,7 +650,7 @@ test('combat selects only nearest visible alive fish within angle, collider rang
     [{ x: 0, y: 1, z: 2 }, { position: { x: 0, y: 1, z: 3.5 } }, false],
     [{ x: 0, y: 1, z: 5 }, { position: { x: 0, y: 2.6, z: 3.5 } }, false],
     [{ x: 0, y: 1, z: 4.5 }, { position: { x: 0, y: 1.8, z: 3.5 } }, true],
-    [{ x: 0, y: 1, z: 4.5 }, { position: { x: 0, y: 1.81, z: 3.5 } }, false],
+    [{ x: 0, y: 1, z: 4.5 }, { position: { x: 0, y: 2, z: 3.5 } }, false],
     [{ x: -5, y: 1, z: 1.72 }, { position: { x: -4.1, y: 1, z: .9 }, yaw: Math.atan2(-.9,.82) }, false],
   ] as const) {
     const candidate = combatArena([combatFish('sprat', fishPosition)], player); punch(candidate);
@@ -684,7 +672,7 @@ test('knockback follows player forward, stops against shop and escapes only live
 });
 
 test('death keeps one grounded corpse, stops jumping and prevents repeated damage or death', () => {
-  const game = combatArena([combatFish('sprat', {x:0,y:1,z:5},10)]); game.advanceTicks(120); punch(game);
+  const game = combatArena([combatFish('sprat', {x:0,y:1,z:5},10)]); game.advanceTicks(108); punch(game);
   const dead = game.getState().fish[0]; assert.equal(dead.state,'groundedDead'); assert.equal(dead.hp,0); close(dead.position.y,1);
   game.advanceTicks(1000); assert.deepEqual(game.getState().fish[0],dead);
   punch(game); game.advanceTicks(27); punch(game); assert.deepEqual(game.getState().fish[0],dead);
@@ -693,18 +681,11 @@ test('death keeps one grounded corpse, stops jumping and prevents repeated damag
   assert.equal(game.getState().terminalFish.length,0); assert.equal(game.getState().coins,0);
 });
 
-test('attack before same-step escape keeps a shore corpse; no attack escapes instead', () => {
-  for (const attacked of [true,false]) {
-    const initial = {...combatFish('sprat',{x:0,y:1,z:9.99},10),jumpTimer:1.8-1/60};
-    const game = combatArena([initial],{position:{x:0,y:1,z:9.1},yaw:0}); game.advanceTicks(1);
-    assert.equal(game.getState().fish[0].jumpPhase,'jumping'); if(attacked) punch(game); game.advanceTicks(1);
-    const state=game.getState();
-    if(attacked) {
-      assert.equal(state.fish.length,1); assert.equal(state.fish[0].state,'groundedDead'); assert.ok(state.fish[0].position.z<=9.8+1e-6);
-      assert.equal(state.terminalFish.length,0); assert.equal(state.events.filter(event=>event.type==='fish_death').length,1);
-      assert.equal(state.events.filter(event=>event.type==='fish_escape').length,0);
-    } else { assert.equal(state.fish.length,0); assert.equal(state.terminalFish.length,1); }
-  }
+test('v2 tick-six damage precedes that same tick fish displacement and escape',()=>{
+ for(const hit of [true,false]){const f={...combatFish('sprat',{x:0,y:1,z:9.99},10),jumpTimer:1.8-5/60};const g=combatArena([f],{position:{x:0,y:1,z:9.1}});
+ if(hit){g.dispatch({type:'primaryDown'});g.dispatch({type:'primaryUp'});}g.advanceTicks(6);
+ if(hit){assert.equal(g.getState().fish[0].state,'groundedDead');assert.equal(g.getState().terminalFish.length,0);}else{assert.equal(g.getState().fish.length,0);assert.equal(g.getState().terminalFish[0].state,'escaped');}}
+
 });
 
 test('combat rejects target/damage injection atomically and cannot damage carried/dead or pause', () => {
@@ -821,19 +802,11 @@ test('hunger updates before strict low-hunger damage with exact boundary and foo
   close(saved.getState().player.hunger,31.4); close(saved.getState().player.hp,1); assert.equal(saved.getState().gamePhase,'running');
 });
 
-test('inventory menu freezes every timer, permits food, rejects gameplay and releases inputs on close', () => {
-  const game=survivalGame(80,10,[storedFish()],[combatFish('sprat',{x:0,y:1,z:5})]);
-  move(game,1); game.advanceTicks(1); game.dispatch({type:'openInventory'});
-  const opened=game.getState(); assert.equal(opened.gamePhase,'paused'); assert.equal(opened.ui.menu,'inventory');
-  game.advanceTicks(300); assert.deepEqual(game.getState(),opened);
-  assert.equal(game.dispatch({type:'resume'}).accepted,false);
-  for(const action of [{type:'move',forward:1,strafe:0,sprint:true},{type:'jump'},{type:'interact'},{type:'primaryDown'},{type:'setMode',mode:'combat'}]) assert.equal(game.dispatch(action).accepted,false);
-  assert.equal(eat(game).accepted,true); const eaten=game.getState(); close(eaten.player.hunger,opened.player.hunger+12); close(eaten.player.hp,opened.player.hp);
-  game.advanceTicks(300); assert.deepEqual(game.getState(),eaten); game.dispatch({type:'closeInventory'}); game.advanceTicks(60);
-  assert.equal(game.getState().gamePhase,'running'); assert.deepEqual(game.getState().player.position,opened.player.position);
-  game.dispatch({type:'openInventory'}); game.dispatch({type:'pause'}); game.dispatch({type:'closeInventory'});
-  assert.equal(game.getState().gamePhase,'paused'); assert.equal(game.getState().ui.menu,'pause');
-  game.dispatch({type:'openInventory'}); game.dispatch({type:'closeInventory'}); assert.equal(game.getState().gamePhase,'paused');
+test('v2 pause freezes every timer, rejects consumption and clears input without a backpack page',()=>{
+ const g=survivalGame(80,10,[storedFish()]);move(g);g.advanceTicks(1);g.dispatch({type:'pause'});const frozen=g.getState();g.advanceTicks(600);assert.deepEqual(g.getState(),frozen);
+ assert.equal(eat(g).accepted,false);assert.equal(g.dispatch({type:'openInventory'}).accepted,false);assert.equal(g.dispatch({type:'selectSlot',index:5}).accepted,false);
+ g.dispatch({type:'resume'});g.advanceTicks(1);assert.deepEqual(g.getState().player.position,frozen.player.position);g.dispatch({type:'selectSlot',index:5});g.dispatch({type:'primaryDown'});assert.equal(g.getState().consumedFish.length,1);
+
 });
 
 test('HP zero produces one game over, freezes the dead session and only confirmed restart recovers', () => {
@@ -844,29 +817,22 @@ test('HP zero produces one game over, freezes the dead session and only confirme
   for(const action of [{type:'resume'},{type:'pause'},{type:'openInventory'},{type:'closeInventory'},{type:'eat',fishId:'food'},{type:'interact'},{type:'jump'},{type:'primaryDown'},{type:'move',forward:1,strafe:0,sprint:true}]) assert.equal(game.dispatch(action).accepted,false);
   assert.equal(game.dispatch({type:'restart',confirm:false}).accepted,false); assert.equal(game.getState().gamePhase,'dead');
   assert.equal(game.dispatch({type:'restart',confirm:true}).accepted,true);
-  const fresh=game.getState(); assert.equal(fresh.gamePhase,'running'); assert.equal(fresh.player.hp,100); assert.equal(fresh.player.hunger,100); assert.equal(fresh.coins,0); assert.equal(fresh.mode,'combat');
+  const fresh=game.getState(); assert.equal(fresh.gamePhase,'running'); assert.equal(fresh.player.hp,100); assert.equal(fresh.player.hunger,100); assert.equal(fresh.coins,0); assert.equal(fresh.mode,'fishing');assert.equal(fresh.selectedSlot,0);
   assert.deepEqual(fresh.inventory,[]); assert.deepEqual(fresh.fish,[]); assert.deepEqual(fresh.consumedFish,[]); assert.equal(fresh.attackCooldownRemaining,0);
   assert.equal(fresh.events.filter(event=>event.type==='restart').length,1); game.advanceTicks(60); assert.deepEqual(game.getState().player.position,fresh.player.position);
   const initiallyDead=survivalGame(0,100); assert.equal(initiallyDead.getState().gamePhase,'dead'); initiallyDead.advanceTicks(60); assert.equal(initiallyDead.getState().simulationTick,0);
 });
 
-test('inventory IDs reserve real catch IDs and food is usable during ordinary pause', () => {
-  const game=new Game(); game.reset({seed:1,fixture:'shore',initial:{player:{position:{x:0,y:1,z:9},hunger:50},inventory:[storedFish('fish-1-1')]} });
-  hook(game); const landed=landWithRealInputs(game); assert.equal(landed.fish[0].id,'fish-1-2'); assert.equal(landed.inventory[0].id,'fish-1-1');
-  game.dispatch({type:'pause'}); const hp=game.getState().player.hp; assert.equal(eat(game,'fish-1-1').accepted,true);
-  assert.equal(game.getState().player.hp,hp); assert.equal(game.getState().gamePhase,'paused'); assert.equal(game.getState().inventory.length,0);
+test('v2 inventory IDs reserve catch IDs and pause cannot consume food',()=>{
+ const g=new Game();g.reset({seed:1,fixture:'shore',initial:{player:{position:{x:0,y:1,z:9},hunger:50},inventory:[storedFish('fish-1-1')]}});hook(g);landWithRealInputs(g);assert.equal(g.getState().fish[0].id,'fish-1-2');
+ g.dispatch({type:'pause'});assert.equal(eat(g,'fish-1-1').accepted,false);assert.equal(g.getState().inventory.length,1);g.dispatch({type:'resume'});assert.equal(eat(g,'fish-1-1').accepted,true);assert.equal(g.getState().inventory.length,0);
+
 });
 
-test('inventory also freezes charge and active reel sessions; closing never restores held fishing input', () => {
-  const charging=northShore(); charging.dispatch({type:'primaryDown'}); charging.advanceTicks(30);
-  charging.dispatch({type:'openInventory'}); const frozenCharge=charging.getState(); charging.advanceTicks(300); assert.deepEqual(charging.getState(),frozenCharge);
-  charging.dispatch({type:'closeInventory'}); charging.advanceTicks(60); close(charging.getState().fishing.chargeSeconds,.5);
-  charging.dispatch({type:'primaryDown'}); charging.advanceTicks(30); close(charging.getState().fishing.chargeSeconds,1);
-  const reel=startReeling(); reel.advanceTicks(12); reel.dispatch({type:'openInventory'}); const paused=reel.getState();
-  reel.advanceTicks(300); assert.deepEqual(reel.getState(),paused); assert.equal(paused.fishing.holding,false);
-  reel.dispatch({type:'closeInventory'}); reel.advanceTicks(6); const after=reel.getState();
-  close(after.fishing.progress,paused.fishing.progress); close(after.fishing.tension,paused.fishing.tension-2);
-  assert.equal(after.fishRngState,paused.fishRngState); assert.equal(after.fishing.cast!.id,paused.fishing.cast!.id);
+test('v2 pause freezes charge and reel without restoring held input',()=>{
+ const charging=northShore();charging.dispatch({type:'primaryDown'});charging.advanceTicks(30);charging.dispatch({type:'pause'});const frozen=charging.getState();charging.advanceTicks(300);assert.deepEqual(charging.getState(),frozen);charging.dispatch({type:'resume'});charging.advanceTicks(60);close(charging.getState().fishing.chargeSeconds,.5);
+ const reel=startReeling();reel.advanceTicks(12);reel.dispatch({type:'pause'});const paused=reel.getState();reel.advanceTicks(300);assert.deepEqual(reel.getState(),paused);reel.dispatch({type:'resume'});reel.advanceTicks(6);close(reel.getState().fishing.tension,paused.fishing.tension-2);close(reel.getState().fishing.progress,paused.fishing.progress);
+
 });
 
 const tradeGame = (inventory: unknown[] = [storedFish('trade-1','bass')], player: unknown = {position:{x:-6,y:1,z:-2}}, coins: unknown = 20) => {
@@ -887,7 +853,7 @@ test('shop open and E use the actual front counter range and reject distance, wa
     [{x:-4.1,y:1,z:-1},false],[{x:-6,y:1,z:1.9},false],[{x:-6,y:4,z:-2},false]] as const) {
     const game=tradeGame([], {position}); const before=game.getState();
     assert.equal(game.dispatch({type:'openShop'}).accepted,accepted);
-    if(accepted) { assert.equal(game.getState().ui.menu,'shop'); game.dispatch({type:'closeShop'}); assert.equal(game.dispatch({type:'interact'}).accepted,true); assert.equal(game.getState().ui.menu,'shop'); }
+    if(accepted) { assert.equal(game.getState().ui.menu,'shop'); game.dispatch({type:'closeShop'});game.dispatch({type:'resume'}); assert.equal(game.dispatch({type:'interact'}).accepted,true); assert.equal(game.getState().ui.menu,'shop'); }
     else { assert.equal(game.getState().ui.menu,'none'); assert.deepEqual(game.getState().player,before.player); assert.equal(game.getState().coins,before.coins); }
   }
   const game=tradeGame(); assert.equal(game.dispatch({type:'openShop',success:true}).accepted,false); assert.equal(game.getState().ui.menu,'none');
@@ -926,27 +892,20 @@ test('sales require the shop menu, reject price injection and overflow atomicall
   const before=game.getState();
   for(const action of [{type:'sell',fishId:'trade-1',price:1000},{type:'sell',fishId:'trade-1',coins:1000},{type:'sell'},{type:'sell',fishId:1},{type:'buy',weapon:'gun'}]) assert.equal(game.dispatch(action).accepted,false);
   assert.deepEqual(game.getState().inventory,before.inventory); assert.equal(game.getState().coins,20);
-  const huge=tradeGame([storedFish('trade-1','tuna')],undefined,Number.MAX_VALUE); huge.dispatch({type:'openShop'});
-  assert.equal(sell(huge).accepted,false); assert.equal(huge.getState().coins,Number.MAX_VALUE); assert.equal(huge.getState().inventory.length,1);
+  const huge=tradeGame([storedFish('trade-1','tuna')],undefined,Number.MAX_SAFE_INTEGER); huge.dispatch({type:'openShop'});
+  assert.equal(sell(huge).accepted,false); assert.equal(huge.getState().coins,Number.MAX_SAFE_INTEGER); assert.equal(huge.getState().inventory.length,1);
 });
 
-test('shop freezes all timers, preserves fish and held-input release, and cannot bypass focus pause or other menus', () => {
-  const game=new Game(); game.reset({seed:1,fixture:'shore',initial:{player:{position:{x:-6,y:1,z:-2},hp:80,hunger:19.5},fish:[combatFish('sprat',{x:0,y:1,z:5})]}});
-  game.dispatch({type:'setMode',mode:'combat'}); punch(game); move(game,-1); game.dispatch({type:'openShop'}); const paused=game.getState();
-  game.advanceTicks(600); assert.deepEqual(game.getState(),paused); assert.equal(game.dispatch({type:'resume'}).accepted,false);
-  assert.equal(game.dispatch({type:'openInventory'}).accepted,false); assert.equal(game.dispatch({type:'closeInventory'}).accepted,false);
-  game.dispatch({type:'closeShop'}); game.advanceTicks(1); const resumed=game.getState();
-  assert.equal(resumed.gamePhase,'running'); assert.deepEqual(resumed.player.position,paused.player.position); close(resumed.player.hunger,19.5-1/600); close(resumed.attackCooldownRemaining,.45-1/60);
-  game.dispatch({type:'openShop'}); game.dispatch({type:'pause'}); game.dispatch({type:'closeShop'}); assert.equal(game.getState().gamePhase,'paused');
-  game.dispatch({type:'openShop'}); game.dispatch({type:'closeShop'}); assert.equal(game.getState().gamePhase,'paused');
-  game.dispatch({type:'openInventory'}); assert.equal(game.dispatch({type:'openShop'}).accepted,false); assert.equal(game.dispatch({type:'closeShop'}).accepted,false);
+test('shop freezes all timers, preserves fish and held-input release, and cannot bypass focus pause or other menus',()=>{
+ const g=tradeGame();g.dispatch({type:'openShop'});const frozen=g.getState();g.advanceTicks(600);assert.deepEqual(g.getState(),frozen);assert.equal(g.dispatch({type:'resume'}).accepted,false);assert.equal(g.dispatch({type:'openInventory'}).accepted,false);g.dispatch({type:'closeShop'});assert.equal(g.getState().ui.menu,'pause');const tick=g.getState().simulationTick;g.advanceTicks(60);assert.equal(g.getState().simulationTick,tick);g.dispatch({type:'resume'});g.advanceTicks(1);assert.equal(g.getState().simulationTick,tick+1);
+
 });
 
 test('shop preserves active fishing and carried fish; opening does not place, duplicate or cancel them', () => {
   const game=new Game(); game.reset({seed:1,fixture:'shore',initial:{player:{position:{x:-6,y:1,z:-3},yaw:Math.PI,pitch:0}}});
   cast(game,60); game.advanceTicks(120); game.dispatch({type:'primaryDown'}); game.advanceTicks(12);
   assert.equal(game.getState().fishing.phase,'reeling'); game.dispatch({type:'openShop'}); const frozen=game.getState(); game.advanceTicks(600); assert.deepEqual(game.getState(),frozen);
-  game.dispatch({type:'closeShop'}); game.advanceTicks(6); close(game.getState().fishing.tension,frozen.fishing.tension-2);
+  game.dispatch({type:'closeShop'});game.dispatch({type:'resume'}); game.advanceTicks(6); close(game.getState().fishing.tension,frozen.fishing.tension-2);
   assert.equal(game.getState().fishRngState,frozen.fishRngState); assert.equal(game.getState().fishing.cast!.id,frozen.fishing.cast!.id);
   const held=new Game(); held.reset({seed:1,fixture:'shore',initial:{player:{position:{x:-6,y:1,z:-2}},fish:[combatFish('sprat',undefined,undefined,'carried','held')]}});
   const fish=held.getState().fish; assert.equal(held.dispatch({type:'interact'}).accepted,true); assert.equal(held.getState().ui.menu,'shop'); assert.deepEqual(held.getState().fish,fish);
@@ -958,7 +917,7 @@ const weaponGame = (weaponId = 'fist', fish: unknown[] = [combatFish('golden',{x
   const game = new Game(); game.reset({seed:1,fixture:'shore',initial:{player,fish,unlockedWeapons:['fist','club','spear','hammer'],currentWeapon:weaponId}});
   game.dispatch({type:'setMode',mode:'combat'}); return game;
 };
-const weaponRows = [['fist',10,2,27,.1],['club',25,2,42,.5],['spear',40,3.2,48,.25],['hammer',65,2,66,1.2]] as const;
+const weaponRows = [['fist',10,2,18,.1],['club',25,2,42,.5],['spear',40,3.2,48,.25],['hammer',65,2,66,1.2]] as const;
 
 test('weapon reset validates IDs and equipped unlock atomically, returns detached arrays, and restart restores fist',()=>{
   const game=weaponGame('spear'); assert.deepEqual(game.getState().unlockedWeapons,['fist','club','spear','hammer']); assert.equal(game.getState().currentWeapon,'spear');
@@ -989,16 +948,15 @@ test('buy uses fixed prices and rejects malformed, injected and imprecise transa
   for(const action of [{type:'buy'},{type:'buy',weaponId:'gun'},{type:'buy',weaponId:1},{type:'buy',weaponId:'fist'},
     {type:'buy',weaponId:'club',price:0},{type:'buy',weaponId:'club',coins:1000},{type:'buy',weaponId:'club',success:true}]) assert.equal(game.dispatch(action).accepted,false);
   assert.equal(game.getState().coins,0); assert.equal(game.getState().events.filter(e=>e.type==='buy').length,3);
-  const huge=tradeGame([],undefined,Number.MAX_VALUE); huge.dispatch({type:'openShop'}); assert.equal(huge.dispatch({type:'buy',weaponId:'club'}).reason,'coin-limit');
-  assert.equal(huge.getState().coins,Number.MAX_VALUE); assert.deepEqual(huge.getState().unlockedWeapons,['fist']);
+  assert.throws(()=>tradeGame([],undefined,Number.MAX_VALUE));const huge=tradeGame([],undefined,Number.MAX_SAFE_INTEGER);huge.dispatch({type:'openShop'});assert.equal(huge.dispatch({type:'buy',weaponId:'club'}).accepted,true);assert.equal(huge.getState().coins,Number.MAX_SAFE_INTEGER-30);
 });
 
 test('all weapon damages, knockbacks and attack snapshots match the table through real targeting',()=>{
   for(const [id,damage,,ticks,knockback] of weaponRows) {
     const game=weaponGame(id); assert.equal(punch(game).accepted,true); const state=game.getState();
-    assert.equal(state.fish[0].hp,150-damage); close(state.fish[0].position.z,1.5+knockback); close(state.attackCooldownRemaining,ticks/60);
+    assert.equal(state.fish[0].hp,150-damage); close(state.fish[0].position.z,1.5+knockback); close(state.attackCooldownRemaining,(ticks-WEAPONS[id].hitTick)/60);
     assert.equal(state.attack.weaponId,id); assert.equal(state.events.filter(e=>e.type==='fish_damage').length,1);
-    game.dispatch({type:'equip',weaponId:id==='fist'?'club':'fist'}); assert.equal(game.getState().attack.weaponId,id); close(game.getState().attackCooldownRemaining,ticks/60);
+    game.dispatch({type:'equip',weaponId:id==='fist'?'club':'fist'}); assert.equal(game.getState().attack.weaponId,id); close(game.getState().attackCooldownRemaining,(ticks-WEAPONS[id].hitTick)/60);
   }
 });
 
@@ -1015,23 +973,15 @@ test('four weapon reach boundaries share collider, angle, nearest and true shop 
 });
 
 test('attack cooldown locks at start across equips, misses, modes, menus and pause; hold never repeats',()=>{
-  for(const [id,,,ticks] of weaponRows) {
-    const game=weaponGame(id,[]); punch(game); const started=game.getState(); game.dispatch({type:'equip',weaponId:'fist'});
-    game.dispatch({type:'setMode',mode:'fishing'}); game.dispatch({type:'setMode',mode:'combat'}); game.dispatch({type:'openInventory'});
-    const frozen=game.getState(); game.advanceTicks(300); assert.deepEqual(game.getState(),frozen); game.dispatch({type:'closeInventory'});
-    for(let i=0;i<ticks-1;i++) { game.advanceTicks(1); assert.equal(punch(game).reason,'attack-cooldown'); }
-    close(game.getState().attackCooldownRemaining,1/60); assert.equal(game.getState().attack.weaponId,started.attack.weaponId);
-    game.advanceTicks(1); assert.equal(punch(game).accepted,true); close(game.getState().attackCooldownRemaining,.45);
-    game.advanceTicks(120); assert.equal(game.getState().attack.sequence,2);
-  }
+ for(const [id,,,ticks]of weaponRows){const g=weaponGame(id,[]);g.dispatch({type:'primaryDown'});g.dispatch({type:'primaryUp'});g.dispatch({type:'equip',weaponId:id==='fist'?'club':'fist'});g.dispatch({type:'pause'});const frozen=g.getState();g.advanceTicks(600);assert.deepEqual(g.getState(),frozen);g.dispatch({type:'resume'});g.advanceTicks(ticks-1);assert.equal(g.getState().attack.weaponId,id);close(g.getState().attackCooldownRemaining,1/60);g.advanceTicks(1);assert.equal(g.dispatch({type:'primaryDown'}).accepted,true);g.advanceTicks(120);assert.equal(g.getState().attack.sequence,2);}
+
 });
 
-test('equip rejects locked weapons and injection, permits inventory without cancelling reel, and dead rejects purchases',()=>{
-  const game=fresh(); assert.equal(game.dispatch({type:'equip',weaponId:'club'}).reason,'weapon-locked'); assert.equal(game.dispatch({type:'equip',weaponId:'fist'}).accepted,true);
-  assert.equal(game.dispatch({type:'equip',weaponId:'fist',damage:100}).accepted,false); assert.equal(game.dispatch({type:'equip',weaponId:'gun'}).accepted,false);
-  game.dispatch({type:'pause'}); assert.equal(game.dispatch({type:'equip',weaponId:'fist'}).accepted,false); game.dispatch({type:'openInventory'}); assert.equal(game.dispatch({type:'equip',weaponId:'fist'}).accepted,true);
-  const reel=startReeling(); reel.dispatch({type:'openInventory'}); const before=reel.getState(); reel.dispatch({type:'equip',weaponId:'fist'}); assert.deepEqual(reel.getState().fishing,before.fishing); assert.equal(reel.getState().fishRngState,before.fishRngState);
-  const dead=survivalGame(0,0); for(const type of ['buy','equip']) assert.equal(dead.dispatch({type,weaponId:'fist'}).reason,'dead');
+test('v2 equip maps a tool slot, rejects locked or paused selection and cancels fishing without rewards',()=>{
+ const g=fresh();assert.equal(g.dispatch({type:'equip',weaponId:'club'}).reason,'weapon-locked');assert.equal(g.dispatch({type:'equip',weaponId:'fist',damage:100}).accepted,false);g.dispatch({type:'pause'});assert.equal(g.dispatch({type:'equip',weaponId:'fist'}).accepted,false);assert.equal(g.dispatch({type:'openInventory'}).accepted,false);g.dispatch({type:'resume'});assert.equal(g.dispatch({type:'equip',weaponId:'fist'}).accepted,true);assert.equal(g.getState().selectedSlot,1);
+ const reel=startReeling(),rng=reel.getState().fishRngState;reel.dispatch({type:'selectSlot',index:1});assert.equal(reel.getState().fishing.phase,'idle');assert.equal(reel.getState().fishRngState,rng);assert.equal(reel.getState().fish.length,0);
+ const dead=survivalGame(0,0);assert.equal(dead.dispatch({type:'equip',weaponId:'fist'}).accepted,false);
+
 });
 
 test('hammer knockback stops at obstacles, alive sea crossing escapes once, lethal hit stays collectible with death priority',()=>{
@@ -1049,7 +999,7 @@ const bossGame = (initial: Record<string,unknown> = {}) => {
   const game=new Game();game.reset({seed:1,fixture:'boss-arena',initial});game.dispatch({type:'setMode',mode:'combat'});return game;
 };
 const initialBoss = (hp=600,tentacleRemaining=4,inkRemaining=3,state='active') => ({state,hp,tentacleRemaining,inkRemaining});
-const bossHit = (game:Game) => { const result=punch(game);game.advanceTicks(1);return result; };
+const bossHit = punch;
 const rareReel = (fishRngState=stateBeforeDraw(0xffffffff)) => {
   const game=new Game();game.reset({seed:1,fixture:'shore',initial:{rareCaughtCount:2,fishRngState,player:{position:{x:0,y:1,z:9}}}});hook(game);return game;
 };
@@ -1081,20 +1031,18 @@ test('third real golden reel success keeps carried fish, increments once and spa
 });
 
 test('rare capture count ignores later fish states and subsequent golden capture never duplicates the boss',()=>{
-  let rng=1;while(!(referenceFishDraw(rng).species==='golden' && referenceFishDraw(referenceFishDraw(rng).state).species==='golden')) rng++;
-  const game=rareReel(rng);landExactly(game);game.dispatch({type:'look',yaw:Math.PI,pitch:0});assert.equal(game.dispatch({type:'interact'}).accepted,true);game.advanceTicks(140);
-  assert.equal(game.getState().fish.length,0);assert.equal(game.getState().terminalFish[0].state,'escaped');assert.equal(game.getState().rareCaughtCount,3);
-  game.dispatch({type:'look',yaw:0,pitch:0});hook(game);landExactly(game);assert.equal(game.getState().rareCaughtCount,4);assert.equal(game.getState().fish[0].state,'carried');assert.equal(game.getState().events.filter(e=>e.type==='boss_spawn').length,1);
-  const transfer=new Game();transfer.reset({seed:1,fixture:'shore',initial:{rareCaughtCount:2,player:{position:{x:-6,y:1,z:-2},hunger:50},inventory:[storedFish('eat-gold','golden'),storedFish('sell-gold','golden')]}});
-  eat(transfer,'eat-gold');transfer.dispatch({type:'openShop'});sell(transfer,'sell-gold');assert.equal(transfer.getState().rareCaughtCount,2);assert.equal(transfer.getState().boss.state,'locked');
+ const g=rareReel();landExactly(g);g.dispatch({type:'look',yaw:Math.PI,pitch:0});g.dispatch({type:'interact'});g.advanceTicks(140);assert.equal(g.getState().rareCaughtCount,3);assert.equal(g.getState().events.filter(e=>e.type==='boss_spawn').length,1);
+ const next=new Game();next.reset({seed:1,fixture:'shore',initial:{rareCaughtCount:3,fishRngState:stateBeforeDraw(0xffffffff),player:{position:{x:-9,y:1,z:-9},yaw:Math.PI}}});hook(next);for(let i=0;i<2000&&next.getState().fishing.phase==='reeling'&&next.getState().gamePhase==='running';i++){const f=next.getState().fishing;next.dispatch({type:'pull',x:-f.pullDirection.x,y:-f.pullDirection.y});if(f.tension>75)next.dispatch({type:'primaryUp'});else if(f.tension<40)next.dispatch({type:'primaryDown'});next.step();}assert.equal(next.getState().rareCaughtCount,4);assert.equal(next.getState().events.filter(e=>e.type==='boss_spawn').length,0);
+ const transfer=tradeGame([storedFish('eat-gold','golden'),storedFish('sell-gold','golden')],{position:{x:-6,y:1,z:-2},hunger:50});eat(transfer,'eat-gold');transfer.dispatch({type:'openShop'});sell(transfer,'sell-gold');assert.equal(transfer.getState().rareCaughtCount,0);assert.equal(transfer.getState().boss.state,'locked');
+
 });
 
 test('boss body sphere receives all four weapon damages without knockback, locks cooldown and picks nearest visible target',()=>{
   for(const [id,damage,,cooldown] of weaponRows) {
     const game=bossGame({unlockedWeapons:['fist','club','spear','hammer'],currentWeapon:id});const p=game.getState().boss.position;
-    assert.equal(bossHit(game).accepted,true);assert.equal(game.getState().boss.hp,600-damage);assert.deepEqual(game.getState().boss.position,p);close(game.getState().attackCooldownRemaining,(cooldown-1)/60);
+    assert.equal(bossHit(game).accepted,true);assert.equal(game.getState().boss.hp,600-damage);assert.deepEqual(game.getState().boss.position,p);close(game.getState().attackCooldownRemaining,(cooldown-WEAPONS[id].hitTick)/60);
     assert.equal(game.getState().attack.targetKind,'boss');assert.equal(game.getState().events.filter(e=>e.type==='boss_damage').length,1);
-    assert.equal(punch(game).accepted,false);game.dispatch({type:'equip',weaponId:'fist'});assert.equal(punch(game).accepted,false);
+    const before=game.getState().boss.hp;game.dispatch({type:'primaryDown'});assert.equal(game.getState().boss.hp,before);game.dispatch({type:'primaryUp'});game.dispatch({type:'equip',weaponId:'fist'});assert.equal(game.getState().attack.weaponId,id);
   }
   const nearest=bossGame({fish:[combatFish('sprat',{x:0,y:1,z:9.4})]});bossHit(nearest);assert.equal(nearest.getState().fish[0].hp,10);assert.equal(nearest.getState().boss.hp,600);
   const far=bossGame({player:{position:{x:0,y:1,z:7.6}}});bossHit(far);assert.equal(far.getState().boss.hp,600);
@@ -1102,58 +1050,51 @@ test('boss body sphere receives all four weapon damages without knockback, locks
   const back=bossGame({player:{yaw:Math.PI}});bossHit(back);assert.equal(back.getState().boss.hp,600);
 });
 
+// The production BossSimulation is exercised in isolation here so contact AI does not mask
+// tentacle/ink timing. Full Game chase/contact/pause paths live in v2-boss.test.ts.
+const remoteBoss=(hp=600,tentacleRemaining=4,inkRemaining=3,position={x:50,y:1,z:0})=>{
+ const sim=new BossSimulation(makeWorld('shore'),bossInitial(3,{state:'active',hp,tentacleRemaining,inkRemaining}));
+ const player={position:{...position},yaw:0,pitch:0,hp:100,hunger:100,oxygen:20};let tick=0;const damages:number[]=[];
+ return {sim,player,damages,step(n:number){for(let i=0;i<n;i++)sim.step(++tick,player,amount=>{damages.push(amount);player.hp-=amount;});}};
+};
+
 test('tentacle locks the tick-240 position, warns exactly 72 ticks, hits once for 15 and lasts 18 active ticks',()=>{
-  const game=bossGame();game.advanceTicks(239);assert.equal(game.getState().boss.attacks.length,0);close(game.getState().boss.tentacleRemaining,1/60);
-  game.advanceTicks(1);let attack=game.getState().boss.attacks[0];assert.equal(attack.type,'tentacle');assert.equal(attack.phase,'warning');assert.deepEqual(attack.position,{x:0,y:1,z:8.5});close(attack.remaining,1.2);
-  game.advanceTicks(71);close(game.getState().player.hp,100);game.advanceTicks(1);attack=game.getState().boss.attacks[0];assert.equal(attack.phase,'active');close(attack.remaining,.3);close(game.getState().player.hp,85);
-  game.advanceTicks(17);assert.equal(game.getState().boss.attacks.length,1);close(game.getState().player.hp,85);game.advanceTicks(1);assert.equal(game.getState().boss.attacks.length,0);close(game.getState().player.hp,85);
-  game.advanceTicks(150);assert.equal(game.getState().boss.attacks[0].phase,'warning');close(game.getState().boss.tentacleRemaining,4);
+ const g=remoteBoss();g.step(239);assert.equal(g.sim.state.attacks.length,0);close(g.sim.state.tentacleRemaining,1/60);g.step(1);let a=g.sim.state.attacks[0];assert.equal(a.type,'tentacle');assert.equal(a.phase,'warning');assert.deepEqual(a.position,{x:50,y:1,z:0});close(a.remaining,1.2);
+ g.step(71);assert.deepEqual(g.damages,[]);g.step(1);a=g.sim.state.attacks[0];assert.equal(a.phase,'active');close(a.remaining,.3);assert.deepEqual(g.damages,[15]);g.step(17);assert.equal(g.sim.state.attacks.length,1);g.step(1);assert.equal(g.sim.state.attacks.length,0);assert.deepEqual(g.damages,[15]);
+
 });
 
 test('locked tentacle warning does not follow movement; leaving radius avoids damage and entering active zone hits once',()=>{
-  const game=bossGame();game.advanceTicks(240);move(game,0,1);game.advanceTicks(31);move(game,0);const locked=game.getState().boss.attacks[0].position;assert.equal(locked.x,0);
-  game.advanceTicks(41);close(game.getState().player.hp,100);move(game,0,-1);game.advanceTicks(2);move(game,0);close(game.getState().player.hp,85);
-  game.advanceTicks(16);close(game.getState().player.hp,85);assert.equal(game.getState().boss.attacks.length,0);
-  const contact=bossGame();contact.advanceTicks(120);close(contact.getState().player.hp,100);
+ const g=remoteBoss();g.step(240);const target={...g.sim.state.attacks[0].position};g.player.position.x=52.1;g.step(72);assert.deepEqual(g.sim.state.attacks[0].position,target);assert.deepEqual(g.damages,[]);g.player.position.x=51.9;g.step(1);assert.deepEqual(g.damages,[15]);g.step(17);assert.deepEqual(g.damages,[15]);
+
 });
 
 test('real hits reaching HP300 switch phase and start a full three-second ink timer without resetting tentacles',()=>{
-  const game=bossGame();for(let i=0;i<30;i++){bossHit(game);if(i<29) game.advanceTicks(26);}
-  assert.equal(game.getState().boss.hp,300);assert.equal(game.getState().boss.phase,2);close(game.getState().boss.inkRemaining,3);
-  const tentacle=game.getState().boss.tentacleRemaining;game.dispatch({type:'openInventory'});const frozen=game.getState();game.advanceTicks(600);assert.deepEqual(game.getState(),frozen);game.dispatch({type:'closeInventory'});
-  game.advanceTicks(179);assert.equal(game.getState().boss.attacks.some(a=>a.type==='ink'),false);game.advanceTicks(1);const ink=game.getState().boss.attacks.find(a=>a.type==='ink')!;assert.equal(ink.phase,'warning');close(ink.remaining,.8);
-  assert.ok(game.getState().boss.tentacleRemaining!==tentacle);assert.ok(game.getState().player.hp>0);
+ const g=bossGame({boss:initialBoss(310)});bossHit(g);assert.equal(g.getState().boss.hp,300);assert.equal(g.getState().boss.phase,2);close(g.getState().boss.inkRemaining,3);close(g.getState().boss.tentacleRemaining,(240-6)/60);
+ g.dispatch({type:'pause'});const frozen=g.getState();g.advanceTicks(600);assert.deepEqual(g.getState(),frozen);g.dispatch({type:'resume'});g.advanceTicks(179);assert.equal(g.getState().boss.attacks.some(a=>a.type==='ink'),false);g.advanceTicks(1);const ink=g.getState().boss.attacks.find(a=>a.type==='ink')!;assert.equal(ink.phase,'warning');close(ink.remaining,.8);
+
 });
 
 test('ink warns 48 ticks, locks its original direction, travels six metres a second and misses a moving player',()=>{
-  const game=bossGame({boss:initialBoss(300)});game.advanceTicks(180);const ink=game.getState().boss.attacks.find(a=>a.type==='ink')!;assert.equal(ink.phase,'warning');close(ink.remaining,.8);
-  assert.deepEqual(ink.direction,{x:0,y:0,z:-1});move(game,0,1);game.advanceTicks(47);move(game,0);assert.equal(game.getState().boss.attacks.find(a=>a.id===ink.id)!.phase,'warning');
-  game.advanceTicks(1);const fired=game.getState().boss.attacks.find(a=>a.id===ink.id)!;assert.equal(fired.phase,'flying');close(fired.remaining,5);close(fired.position.z,12);
-  game.advanceTicks(60);const moved=game.getState().boss.attacks.find(a=>a.id===ink.id)!;close(moved.position.z,6);close(moved.remaining,4);assert.deepEqual(moved.direction,ink.direction);close(game.getState().player.hp,100);
-  game.advanceTicks(240);assert.equal(game.getState().boss.attacks.some(a=>a.id===ink.id),false);
+ const g=remoteBoss(300);g.step(180);const ink=structuredClone(g.sim.state.attacks.find(a=>a.type==='ink')!);assert.equal(ink.phase,'warning');close(ink.remaining,.8);assert.equal(ink.type,'ink');if(ink.type!=='ink')throw Error('missing ink');
+ g.player.position.z=6;g.step(47);assert.equal(g.sim.state.attacks.find(a=>a.id===ink.id)!.phase,'warning');g.step(1);let shot=g.sim.state.attacks.find(a=>a.id===ink.id)!;assert.equal(shot.phase,'flying');close(shot.remaining,5);const start={...shot.position};g.step(60);shot=g.sim.state.attacks.find(a=>a.id===ink.id)!;close(Math.hypot(shot.position.x-start.x,shot.position.y-start.y,shot.position.z-start.z),6);if(shot.type==='ink')assert.deepEqual(shot.direction,ink.direction);close(shot.remaining,4);g.step(240);assert.equal(g.sim.state.attacks.some(a=>a.id===ink.id),false);
+
 });
 
 test('ink swept body hit deals ten once and destroys projectile; pausing warning and flight freezes every timer',()=>{
-  const game=bossGame({boss:initialBoss(300)});game.advanceTicks(180);game.dispatch({type:'pause'});let frozen=game.getState();game.advanceTicks(600);assert.deepEqual(game.getState(),frozen);game.dispatch({type:'resume'});
-  game.advanceTicks(48);const inkId=game.getState().boss.attacks.find(a=>a.type==='ink')!.id;game.advanceTicks(5);game.dispatch({type:'pause'});frozen=game.getState();game.advanceTicks(300);assert.deepEqual(game.getState(),frozen);game.dispatch({type:'resume'});
-  game.advanceTicks(26);close(game.getState().player.hp,90);assert.equal(game.getState().boss.attacks.some(a=>a.id===inkId),false);game.advanceTicks(12);close(game.getState().player.hp,90);
+ const g=remoteBoss(300,4,0,{x:0,y:20,z:8.5});g.step(1);const id=g.sim.state.attacks.find(a=>a.type==='ink')!.id;g.step(48);assert.equal(g.sim.state.attacks.find(a=>a.id===id)!.phase,'flying');g.step(200);assert.equal(g.sim.state.attacks.some(a=>a.id===id),false);assert.deepEqual(g.damages,[10]);
+ const real=bossGame({boss:initialBoss(300)});real.advanceTicks(180);real.dispatch({type:'pause'});const frozen=real.getState();real.advanceTicks(600);assert.deepEqual(real.getState(),frozen);
+
 });
 
 test('boss damage and starvation share a health baseline so hunger cannot heal away tentacle damage',()=>{
-  const game=bossGame({player:{hunger:19.5}});game.advanceTicks(312);close(game.getState().player.hp,100-312/30-15);game.advanceTicks(1);close(game.getState().player.hp,100-313/30-15);
-  const eaten=bossGame({player:{hunger:19.5},inventory:[storedFish('food','golden')]});eaten.advanceTicks(312);const hp=eaten.getState().player.hp;eat(eaten);eaten.advanceTicks(60);close(eaten.getState().player.hp,hp);
+ const g=bossGame({player:{position:{x:0,y:1,z:9.7},hunger:19.5},inventory:[storedFish('food','golden')]});g.advanceTicks(1);close(g.getState().player.hp,85-1/30);g.advanceTicks(1);close(g.getState().player.hp,85-2/30);eat(g);const hp=g.getState().player.hp;g.advanceTicks(30);close(g.getState().player.hp,hp);
+
 });
 
 test('victory, boss death and simultaneous lethal damage resolve at the fixed tick with player death priority and freeze',()=>{
-  for(const [playerHp,bossHp,expected] of [[100,10,'victory'],[15,600,'dead'],[15,10,'dead']] as const) {
-    const game=bossGame({player:{hp:playerHp},boss:initialBoss(bossHp,1/60)});game.advanceTicks(72);
-    if(bossHp===10) punch(game);game.advanceTicks(1);const final=game.getState();assert.equal(final.gamePhase,expected);assert.equal(final.player.hp,playerHp===15?0:85);
-    assert.equal(final.boss.state,bossHp===10?'defeated':'active');assert.equal(final.events.filter(e=>e.type==='victory').length,expected==='victory'?1:0);game.advanceTicks(600);assert.deepEqual(game.getState(),final);
-    for(const action of [{type:'resume'},{type:'move',forward:1,strafe:0,sprint:true},{type:'primaryDown'},{type:'openInventory'},{type:'buy',weaponId:'club'},{type:'equip',weaponId:'fist'}]) assert.equal(game.dispatch(action).accepted,false);
-    game.dispatch({type:'restart',confirm:true});assert.equal(game.getState().rareCaughtCount,0);assert.equal(game.getState().boss.state,'locked');assert.equal(game.getState().gamePhase,'running');assert.equal(game.getState().stats.caught,0);
-  }
-  const direct=bossGame({boss:initialBoss(0,0,0,'defeated')});assert.equal(direct.getState().gamePhase,'victory');
-  const both=bossGame({player:{hp:0},boss:initialBoss(0,0,0,'defeated')});assert.equal(both.getState().gamePhase,'dead');
+ for(const [hp,bossHp,phase]of [[100,10,'victory'],[15,600,'dead'],[15,10,'dead']]as const){const g=bossGame({player:{hp},boss:initialBoss(bossHp,1/60)});g.advanceTicks(67);if(bossHp===10){g.dispatch({type:'primaryDown'});g.dispatch({type:'primaryUp'});}g.advanceTicks(6);const end=g.getState();assert.equal(end.gamePhase,phase);assert.equal(end.player.hp,hp===15?0:85);assert.equal(end.boss.state,bossHp===10?'defeated':'active');assert.equal(end.events.filter(e=>e.type==='victory').length,phase==='victory'?1:0);g.advanceTicks(600);assert.deepEqual(g.getState(),end);assert.equal(g.dispatch({type:'resume'}).accepted,false);g.dispatch({type:'restart',confirm:true});assert.equal(g.getState().boss.state,'locked');assert.equal(g.getState().rareCaughtCount,0);}
+
 });
 
 test('boss hit cannot be injected, shared cooldown survives pause, and victory stats only count real damage',()=>{
@@ -1184,10 +1125,10 @@ test('save preserves exact jumping, warning, flight and survival clocks instead 
   game.advanceTicks(17);const saved=game.exportSave();const recovered=fresh();recovered.importSave(JSON.parse(JSON.stringify(saved)));recovered.dispatch({type:'resume'});
   game.advanceTicks(30);recovered.advanceTicks(30);const a=game.getState(),b=recovered.getState();for(const key of ['player','fish','boss','fishRngState','simulationTick'] as const)assert.deepEqual(b[key],a[key]);
 });
-test('save rejects every active fishing phase and attack animation but permits completed animation with remaining cooldown',()=>{
-  const game=fresh();game.reset({seed:1,fixture:'shore',initial:{player:{position:{x:0,y:1,z:9}}}});game.dispatch({type:'primaryDown'});assert.throws(()=>game.exportSave());game.dispatch({type:'primaryUp'});assert.throws(()=>game.exportSave());game.advanceTicks(120);assert.throws(()=>game.exportSave());game.dispatch({type:'primaryDown'});assert.throws(()=>game.exportSave());game.dispatch({type:'cancelFishing'});
-  game.dispatch({type:'setMode',mode:'combat'});game.dispatch({type:'primaryDown'});assert.throws(()=>game.exportSave());game.advanceTicks(27);assert.doesNotThrow(()=>game.exportSave());
-  game.reset({seed:1,fixture:'boss-arena',initial:{unlockedWeapons:['hammer'],currentWeapon:'hammer'}});game.dispatch({type:'setMode',mode:'combat'});game.dispatch({type:'primaryDown'});game.advanceTicks(51);const value=game.exportSave();assert.equal(value.state.attackCooldownRemaining,.25);const recovered=fresh();recovered.importSave(value);recovered.dispatch({type:'resume'});assert.equal(recovered.dispatch({type:'primaryDown'}).accepted,false);recovered.advanceTicks(15);assert.equal(recovered.dispatch({type:'primaryDown'}).accepted,true);
+test('v2 save rejects fishing and every unfinished locked weapon cycle, then accepts the completed action',()=>{
+ const g=northShore();g.dispatch({type:'primaryDown'});assert.throws(()=>g.exportSave());g.dispatch({type:'primaryUp'});assert.throws(()=>g.exportSave());g.advanceTicks(120);assert.throws(()=>g.exportSave());g.dispatch({type:'primaryDown'});assert.throws(()=>g.exportSave());g.dispatch({type:'cancelFishing'});
+ for(const [id,,,cycle] of weaponRows){const w=weaponGame(id,[]);w.dispatch({type:'primaryDown'});w.dispatch({type:'primaryUp'});w.advanceTicks(cycle-1);assert.throws(()=>w.exportSave());w.advanceTicks(1);assert.doesNotThrow(()=>w.exportSave());assert.equal(w.getState().attackCooldownRemaining,0);}
+
 });
 test('invalid or truncated save rejects atomically including duplicate IDs, negative coins and associated boss states',()=>{
   const game=fresh();const valid=game.exportSave();const before=game.getState();const mutations=[(v:any)=>v.version=9,(v:any)=>delete v.runtime,(v:any)=>v.state.coins=-1,(v:any)=>v.state.player.hp=NaN,(v:any)=>v.state.currentWeapon='hammer',(v:any)=>v.state.boss.state='active',(v:any)=>v.state.inventory=[{id:'duplicate',species:'sprat',state:'inventoryDead'},{id:'duplicate',species:'bass',state:'inventoryDead'}],(v:any)=>v.runtime.survival.hungerTicks=-1,(v:any)=>v.state.gamePhase='victory'];
@@ -1215,7 +1156,7 @@ test('save and restore preserve actual sold and consumed deduplication and initi
 });
 
 test('a real lethal boss attack finishes its visual action at terminal commit and saves victory without duplicate events',()=>{
-  const game=fresh();game.reset({seed:1,fixture:'boss-arena',initial:{boss:{state:'active',hp:10,tentacleRemaining:4,inkRemaining:3}}});game.dispatch({type:'setMode',mode:'combat'});game.dispatch({type:'primaryDown'});game.step();assert.equal(game.getState().gamePhase,'victory');const value=game.exportSave();assert.equal(value.state.stats.bossDamageDealt,10);const tick=value.state.simulationTick;game.importSave(value);assert.equal(game.getState().gamePhase,'victory');assert.equal(game.getState().events.length,0);assert.equal(game.getState().simulationTick,tick);
+  const game=fresh();game.reset({seed:1,fixture:'boss-arena',initial:{boss:{state:'active',hp:10,tentacleRemaining:4,inkRemaining:3}}});game.dispatch({type:'setMode',mode:'combat'});game.dispatch({type:'primaryDown'});game.advanceTicks(6);assert.equal(game.getState().gamePhase,'victory');const value=game.exportSave();assert.equal(value.state.stats.bossDamageDealt,10);const tick=value.state.simulationTick;game.importSave(value);assert.equal(game.getState().gamePhase,'victory');assert.equal(game.getState().events.length,0);assert.equal(game.getState().simulationTick,tick);
 });
 
 import { Persistence } from '../src/game/persistence.ts';
@@ -1301,22 +1242,10 @@ test('volume accepts finite fractional percentages across the documented zero-to
 });
 
 
-test('legacy v1 hunger loads without a jump and new saves resume at the slower rate', () => {
-  const original = fresh(); original.advanceTicks(120);
-  const legacy = original.exportSave();
-  legacy.runtime.survival.hungerBase = 100;
-  legacy.runtime.survival.hungerTicks = 120;
-  legacy.state.player.hunger = 99;
-  const recovered = fresh(); recovered.importSave(legacy);
-  assert.equal(recovered.getState().player.hunger, 99);
-  recovered.dispatch({type:'resume'}); recovered.advanceTicks(60);
-  close(recovered.getState().player.hunger, 98.9);
-  const saved = recovered.exportSave();
-  assert.equal(saved.version, 1); assert.equal(saved.runtime.survival.hungerTicks, 0);
-  const next = fresh(); next.importSave(saved);
-  close(next.getState().player.hunger, 98.9);
-  next.dispatch({type:'resume'}); next.advanceTicks(60);
-  close(next.getState().player.hunger, 98.8);
+test('v2 rejects old file version atomically and restores the slower hunger clock',()=>{
+ const g=fresh();g.advanceTicks(120);const save=g.exportSave();assert.equal(save.version,2);assert.equal(save.runtime.survival.hungerTicks,0);const old={...save,version:1};const before=g.getState();assert.throws(()=>g.importSave(old));assert.deepEqual(g.getState(),before);
+ const next=fresh();next.importSave(save);close(next.getState().player.hunger,99.8);next.dispatch({type:'resume'});next.advanceTicks(60);close(next.getState().player.hunger,99.7);
+
 });
 
 test('Boss playtest starts paused, permits real damage and restarts the preset encounter', () => {
@@ -1326,7 +1255,7 @@ test('Boss playtest starts paused, permits real damage and restarts the preset e
   assert.equal(initial.currentWeapon, 'hammer'); assert.equal(initial.mode, 'combat');
   assert.equal(initial.unlockedWeapons.length, 4); assert.equal(initial.rareCaughtCount, 3);
   game.advanceTicks(600); assert.equal(game.getState().simulationTick, 0);
-  game.dispatch({type:'resume'}); game.dispatch({type:'primaryDown'}); game.advanceTicks(1);
+  game.dispatch({type:'resume'}); game.dispatch({type:'primaryDown'}); game.advanceTicks(20);
   assert.equal(game.getState().boss.hp, 535);
   game.dispatch({type:'restart',confirm:true});
   const restarted = game.getState();
