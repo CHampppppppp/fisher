@@ -1,0 +1,56 @@
+{
+  "scope": "Synthetic restoration checks only, not product scoring or separate-agent review",
+  "python": "3.14.3 (v3.14.3:323c59a5e34, Feb  3 2026, 11:41:37) [Clang 16.0.0 (clang-1600.0.26.6)]",
+  "cases": [
+    {
+      "case": "valid-extraction",
+      "passed": true
+    },
+    {
+      "case": "verify-only",
+      "passed": true
+    },
+    {
+      "case": "existing-destination-rejected",
+      "passed": true
+    },
+    {
+      "case": "traversal-rejected-before-extraction",
+      "passed": true
+    },
+    {
+      "case": "windows-drive-rejected-before-extraction",
+      "passed": true
+    },
+    {
+      "case": "windows-backslash-rejected-before-extraction",
+      "passed": true
+    },
+    {
+      "case": "symlink-rejected-before-extraction",
+      "passed": true
+    },
+    {
+      "case": "part-corrupt-rejected-before-extraction",
+      "passed": true
+    },
+    {
+      "case": "member-hash-rejected-before-extraction",
+      "passed": true
+    },
+    {
+      "case": "archive-hash-rejected-before-extraction",
+      "passed": true
+    },
+    {
+      "case": "missing-part-rejected-before-extraction",
+      "passed": true
+    },
+    {
+      "case": "duplicate-part-rejected-before-extraction",
+      "passed": true
+    }
+  ],
+  "total": 12,
+  "passed": 12
+}
